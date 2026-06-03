@@ -1,0 +1,12 @@
+[project]
+name = "pudding"
+version = "0.0.0"
+description = "A Lean 4 prover pipeline on Modal: GPU-served prover, CPU Lean verifier, local compile-and-retry loop."
+requires-python = ">=3.11"
+dependencies = [
+    "modal>=0.64",
+    "openai>=1.0",
+    "kimina-client",   # client for the Kimina Lean Server (the verifier)
+]
+
+# Versions are starting guesses — see PLAN.md. Nothing here has been run yet.
