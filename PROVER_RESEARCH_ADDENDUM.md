@@ -13,9 +13,10 @@ re-derive it on return. It **corrects two guesses in `PLAN.md`** (marked ⚠️)
   the Dockerfile only if we need a *different* Lean version than 4.26.0 (see version-match risk).
 - ⚠️ **The Kimina API is `POST /api/check`**, not `/verify`. Payload uses `snippets` +
   `id` + `code`, not `codes` + `custom_id`. (PLAN §2.1 guessed the older/0.x shape.)
-- The metered **DeepSeek-Prover-V2-671B on DeepInfra appears delisted** as of 2026-06
-  (their catalog now shows DeepSeek-V4-Pro/Flash, V3.2 — no Prover-V2). The "cheapest
-  entry = meter the 671B" route in the blog may be dead; re-check Novita/Featherless when we return.
+- The metered **DeepSeek-Prover-V2-671B route is live on Novita** (~$0.70/$2.50 per 1M,
+  OpenAI-compatible at `https://api.novita.ai/openai`, 160K ctx) — confirmed against the
+  catalog (https://novita.ai/models/model-detail/deepseek-deepseek-prover-v2-671b). This is
+  the blog's "cheapest entry = meter the 671B" route; needs a Novita API key.
 
 ## 1. Verifier image — the proven recipe (from the Modal case study)
 
@@ -122,8 +123,8 @@ Supported range observed in README/Dockerfile: v4.9.0 … v4.26.0 (a `<=v4.9.0` 
    appears ungated (confirm). This is the most faithful to PLAN and deployable immediately.
 2. **Local MLX on the Mac** — blog suggests DeepSeek-Prover-V2-7B → Goedel-Prover-V2-32B (MLX 8-bit).
    Zero cloud cost, fully private, slower. Good laptop-dev path.
-3. **Metered hosted endpoint** — DeepInfra Prover-V2 looks gone (2026-06); re-check Novita / Featherless.
-   Needs an API key from the user.
+3. **Metered hosted endpoint** — DeepSeek-Prover-V2-671B on **Novita** (OpenAI-compatible,
+   `https://api.novita.ai/openai`, ~$0.70/$2.50 per 1M). Needs a Novita API key from the user.
 - The case study's own default model is the tiny `AI-MO/Kimina-Prover-Preview-Distill-1.5B` —
   a cheap smoke-test model if we just want the loop wired before committing GPU.
 
@@ -145,4 +146,4 @@ Supported range observed in README/Dockerfile: v4.9.0 … v4.26.0 (a `<=v4.9.0` 
 - Modal RL theorem case study (code read directly): https://github.com/agencyenterprise/modal-rl-theorem-case-study · blog https://modal.com/blog/building-an-rl-theorem-proving-workflow-on-modal
 - DeepSeek-Prover-V2: https://github.com/deepseek-ai/DeepSeek-Prover-V2 · https://huggingface.co/deepseek-ai/DeepSeek-Prover-V2-7B · arXiv 2504.21801
 - Goedel-Prover-V2: https://github.com/Goedel-LM/Goedel-Prover-V2 · arXiv 2508.03613
-- DeepInfra catalog (Prover-V2 not found 2026-06): https://deepinfra.com/models/text-generation
+- Novita DeepSeek-Prover-V2-671B (serverless, confirmed 2026-06): https://novita.ai/models/model-detail/deepseek-deepseek-prover-v2-671b

@@ -8,6 +8,11 @@ dependencies = [
     "openai>=1.0",
     "jupyter_client",  # local IPython kernel = the solver's executor
     "ipykernel",       # the kernel the solver runs code in
+    "sympy",           # the libs model-written code reaches for
+    "numpy",
+    "scipy",
+    "fastapi",         # the OpenAI-compatible chat shim (shim.py → Open WebUI)
+    "uvicorn",
     # "kimina-client",   # client for the Kimina Lean Server = the prover's verifier
 ]
 

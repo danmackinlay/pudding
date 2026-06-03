@@ -25,8 +25,10 @@ The prover is the solver with three changes: the executor becomes a Lean verifie
 
 **The solver spine is verified end-to-end** against a live metered endpoint (Featherless)
 and a Modal-hosted executor: the TIR loop, the local IPython `Kernel` (state persists,
-errors captured), the remote-executor swap, and `eval.py` over the §9.4 staircase all run
-(3/4 — the one miss is a model trap, see below). The **prover is stage 2** and untested;
+errors captured), the remote-executor swap, and `eval.py` over the §9.4 staircase all run.
+A **streaming chat UI** is wired (Stage 1.5): `solve_stream` → an OpenAI-compatible `shim.py`
+(with a streaming-LaTeX/FOIM delimiter buffer so `\(…\)`/`\boxed{}` never flash) → **Open
+WebUI** (`OPEN_WEBUI.md`). The **prover is stage 2** and untested;
 its research is frozen in `PROVER_RESEARCH_ADDENDUM.md` (which corrects two guesses in
 `PLAN.md` — there's a prebuilt Kimina image, so no multi-hour `lean_image` build). Read
 `PLAN.md` before executing.
@@ -56,6 +58,12 @@ direnv exec . uv run python eval.py --data gsm8k --n 20   # or a benchmark slice
 direnv exec . uv run modal deploy executor/modal_executor.py  # remote executor (heavy compute)
 direnv exec . uv run modal run fanout.py --k 8                # maj@k over Modal .map
 #   self-host the model instead of metering:  modal deploy serve.py  +  set SOLVER_BASE_URL
+
+# chat UI — run the loop behind an OpenAI-compatible shim, then point Open WebUI at it
+direnv exec . uv run uvicorn shim:app --port 8000          # the TIR loop as /v1/chat/completions
+WEBUI_AUTH=False OPENAI_API_BASE_URLS=http://localhost:8000/v1 OPENAI_API_KEYS=dummy \
+  uvx --python 3.11 open-webui@latest serve --port 8080    # open http://localhost:8080 → tir-solver
+#   details + Docker fallback: OPEN_WEBUI.md
 
 # prover (stage 2 — see PROVER_RESEARCH_ADDENDUM.md; uses a prebuilt Kimina image)
 ```

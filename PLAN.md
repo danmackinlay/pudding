@@ -197,3 +197,34 @@ Sources: vLLM `SamplingParams` (https://docs.vllm.ai/en/latest/api/vllm/sampling
 1. **Self-host `serve.py` (vLLM)** — `n=k` in one request (or rely on `@modal.concurrent` batching). The only path with `n>1` *and* the prefill saving. The repo already supports it via `SOLVER_BASE_URL`.
 2. **Novita for the solver** *iff* it lists the Qwen2.5-Math models (catalogue check — we have a Novita key for the prover). `n` ≤128 sidesteps the per-request concurrency cap; still per-token.
 3. **Stay on Featherless** for single-shot dev; accept maj@k is concurrency-bound to the tier.
+
+## 11. Supporting generalist reasoners (a second orchestrator contract)
+
+**Why.** The specialist solvers (OpenMath-Nemotron, AceMath) are Featherless-or-DIY only (§ off-the-shelf), and the 2026 open math leaderboards are increasingly topped by *general* frontier reasoners — DeepSeekMath-V2 (Apache-2.0, NL self-verifying proofs, https://huggingface.co/deepseek-ai/DeepSeek-Math-V2), Qwen3-235B-Thinking, Kimi-K2 — which *are* widely rentable per-token. So we'll likely want the loop to drive a generalist. It can't, as written.
+
+**What breaks.** `solver_loop.py` assumes the Qwen2.5-Math TIR contract: hand-rolled `<|im_start|>` template on `/v1/completions`, stop on the ```` ```output ```` fence, splice the result inline. Generalists differ on two axes:
+1. **Reasoning is a separate channel**, not inline — a `reasoning_content` field (DeepSeek/Qwen3/Kimi) or a hidden/summarized trace (OpenAI o-series, Gemini). You must NOT feed it back as the answer, and some APIs 400 if you echo it (DeepSeek) or break multi-step tool loops if you *don't* resend it (Kimi-K2).
+2. **Tool use = the `tools`/`tool_calls` protocol**, not fence-splice: the model emits a structured JSON call, you execute and return a `role:"tool"` message; loop while `finish_reason == "tool_calls"`, stop on `"stop"`.
+
+**Design: a pluggable contract, executor unchanged.** The `Kernel` / remote `Executor` (`run(code) -> str`) stays exactly as-is. Add a `mode` to the orchestrator:
+
+| Mode | For | Loop |
+|---|---|---|
+| `fence` (current) | Qwen2.5-Math, OpenMath-Nemotron (maths-tuned) | stop on `output` fence, splice inline |
+| `tools` | generalists with a code executor | register a `run_python` tool; loop on `tool_calls` → execute in `Kernel` → append `role:"tool"`; stop on `"stop"` |
+| `cot` | generalists, no executor | sample n, `extract_boxed`, vote — no executor in the loop; often competitive for competition maths |
+
+**Start with `cot`.** It needs *no harness at all* — one chat call, no executor, reuse `extract_boxed`, vote across `n` samples — and a strong reasoner is competitive-or-better this way on most competition maths. Only add `tools` mode when problems need exact computation the model fumbles in its head (the `7^999 → 43` class of error). Sequence: `cot` first (free), `tools` only if accuracy demands it. We deliberately keep execution on *our* `Kernel` either way — no provider-hosted code-interpreter (the whole repo exists to avoid handing execution to the provider).
+
+Switch to the **chat endpoint** (`chat.completions`, or OpenAI **Responses** API for o-series/GPT-5) — drop the hand-rolled completion template; the server applies the model's chat template and parses `reasoning_content`/`tool_calls` into fields. `extract_boxed` is reused for `cot` and as a fallback.
+
+**Per-model gotchas (verified, 2026-06):**
+- **DeepSeek** (R1/V3.x): reasoning in `reasoning_content`; **strip it before echoing the turn back** (else HTTP 400). R1 had no function calling; V3.1+ added it, V3.2 added tools-in-thinking. https://api-docs.deepseek.com/guides/reasoning_model
+- **Qwen3**: `reasoning_content` (vLLM `--reasoning-parser deepseek_r1`); native tools via `--enable-auto-tool-choice --tool-call-parser hermes`; thinking + tools combine. https://qwen.readthedocs.io/en/latest/framework/function_call.html
+- **Kimi-K2**: `reasoning_content`; **must resend it in tool-call history** or multi-step breaks; built for long-horizon agentic loops. https://github.com/MoonshotAI/Kimi-K2/blob/main/docs/tool_call_guidance.md
+- **OpenAI o-series / GPT-5.x**: reasoning hidden (summary only); use the **Responses API**; pass reasoning items back between tool calls (`previous_response_id` / `encrypted_content`); built-in code interpreter available. https://platform.openai.com/docs/guides/reasoning
+- **Gemini 2.5/3**: thought summaries (`includeThoughts`), **thought signatures must round-trip** for function calling; native `code execution` tool. https://ai.google.dev/gemini-api/docs/function-calling
+
+**Token budget.** Reasoning shares `max_tokens` with the answer; a model can spend the whole budget reasoning and return `content=""` (200 OK, billed). Reserve generously (OpenAI suggests ≥25k for reasoning models). This is the repo's existing `MAX_TOKENS` concern, amplified.
+
+**Status:** design only — not built. `fence` mode (current `solver_loop.py`) is the spine; `tools`/`cot` modes are the generalist extension, parallel in spirit to how the prover extends the solver.

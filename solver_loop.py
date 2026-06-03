@@ -11,8 +11,12 @@ the remote `executor/modal_executor.py` Sandbox when the computation is heavy.
 UNTESTED. See PLAN.md §5 for the testing order (the solver is steps 1–5).
 """
 import os
+import time
+from typing import Iterator
 
 from openai import OpenAI
+
+from streaming import ev  # shared event envelope (also used by the UI shim + stage-2 prover)
 
 MODEL = "Qwen/Qwen2.5-Math-7B-Instruct"
 
@@ -102,18 +106,72 @@ def extract_boxed(text: str) -> str | None:
     return "".join(out).strip() if depth == 0 else None
 
 
-def solve(problem: str, executor=None, max_calls: int = MAX_CALLS, client: OpenAI | None = None,
-          temperature: float = 0.0, seed: int | None = None, model: str | None = None,
-          max_tokens: int = MAX_TOKENS) -> str:
-    """Generate → run code → feed result back, until the model emits no fresh block.
+# Transient provider hiccups (Featherless 503 / "temporarily at capacity" / 429 rate limit)
+# — retry with exponential backoff rather than surfacing them. A first cut of the Stage 1.6
+# retry policy, pulled forward because the flakiness is frequent enough to disrupt the UI.
+_TRANSIENT = ("capacity", "temporarily", "overloaded", "rate limit", "try again", "timeout")
 
-    `executor` has `.run(code) -> str` (default: a local `Kernel`). For the remote
-    executor, pass `modal.Cls.from_name("pudding-executor", "Executor")()` and note that
-    Modal calls it as `executor.run.remote(code)` — the one-line adapter below handles
-    both. Returns the full transcript; the answer is the last \\boxed{...} (extract_boxed).
 
-    `temperature`>0 + a distinct `seed` per call is what makes the k chains of maj@k
-    diverge (fanout.py); the single greedy default is for interactive one-shots.
+def _is_transient(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(k in msg for k in _TRANSIENT) or "503" in msg or "429" in msg or "502" in msg
+
+
+def _create(client, args, stream, retries: int = 4, base: float = 2.0):
+    """`completions.create` with backoff on transient provider errors (the request is
+    rejected pre-generation, so retrying at the call site is safe — no partial output)."""
+    for attempt in range(retries + 1):
+        try:
+            if stream:
+                return client.completions.create(
+                    stream=True, stream_options={"include_usage": True}, **args)
+            return client.completions.create(**args)
+        except Exception as e:  # noqa: BLE001
+            if not _is_transient(e) or attempt == retries:
+                raise
+            time.sleep(base * (2 ** attempt))  # 2s, 4s, 8s, 16s
+
+
+def _generate(client, model, prompt, temperature, max_tokens, seed, stream):
+    """One model call. Yields ("delta", text) chunks, then a final ("done", info) with
+    {text, finish_reason, completion_tokens, prompt_tokens}. `stream=False` yields the whole
+    text as a single delta (so the blocking `solve()` path is byte-identical to before)."""
+    args = dict(model=model, prompt=prompt, temperature=temperature, max_tokens=max_tokens,
+                seed=seed, stop=[OUT_OPEN, "\n\n---"])
+    if not stream:
+        r = _create(client, args, stream=False)
+        u = getattr(r, "usage", None)
+        yield "delta", r.choices[0].text
+        yield "done", {"text": r.choices[0].text, "finish_reason": r.choices[0].finish_reason,
+                       "completion_tokens": getattr(u, "completion_tokens", None),
+                       "prompt_tokens": getattr(u, "prompt_tokens", None)}
+        return
+    text, finish, ctoks, ptoks = "", None, None, None
+    s = _create(client, args, stream=True)
+    for chunk in s:
+        if chunk.choices:
+            delta = chunk.choices[0].text or ""
+            if delta:
+                text += delta
+                yield "delta", delta
+            if chunk.choices[0].finish_reason:
+                finish = chunk.choices[0].finish_reason
+        if getattr(chunk, "usage", None):  # final usage chunk (include_usage)
+            ctoks, ptoks = chunk.usage.completion_tokens, chunk.usage.prompt_tokens
+    yield "done", {"text": text, "finish_reason": finish,
+                   "completion_tokens": ctoks, "prompt_tokens": ptoks}
+
+
+def solve_stream(problem: str, executor=None, max_calls: int = MAX_CALLS,
+                 client: OpenAI | None = None, temperature: float = 0.0,
+                 seed: int | None = None, model: str | None = None,
+                 max_tokens: int = MAX_TOKENS, stream: bool = True) -> Iterator[dict]:
+    """The TIR loop as a stream of events (the shared envelope; see streaming.py).
+
+    Yields: `reasoning_delta{text}` per token chunk, `code{lang,code}` before each
+    execution, `tool_result{output}` after, a final `final_answer{boxed, transcript,
+    elapsed_s, completion_tokens, truncated}`, or `error{message}` on failure. This is what
+    the UI shim consumes; `solve()` below consumes it in non-stream mode for eval/fanout.
     """
     client = client or make_client()
     model = model or MODEL
@@ -122,18 +180,54 @@ def solve(problem: str, executor=None, max_calls: int = MAX_CALLS, client: OpenA
 
     prompt = (f"<|im_start|>system\n{SYS}<|im_end|>\n"
               f"<|im_start|>user\n{problem}<|im_end|>\n<|im_start|>assistant\n")
-    for _ in range(max_calls + 1):
-        r = client.completions.create(
-            model=model, prompt=prompt, temperature=temperature, max_tokens=max_tokens,
-            seed=seed,
-            stop=[OUT_OPEN, "\n\n---"],   # halt the moment a tool result is wanted
-        )
-        prompt += r.choices[0].text
-        code = last_code(r.choices[0].text)
-        if code is None or not code.strip():  # no fresh code (or a degenerate empty ``` fence) -> done
-            break
-        prompt += f"{OUT_OPEN}\n{run(code)}\n{CLOSE}\n"
-    return prompt
+    t0, comp_tokens, truncated = time.time(), 0, False
+    try:
+        for _ in range(max_calls + 1):
+            round_text, info = "", {}
+            for kind, payload in _generate(client, model, prompt, temperature,
+                                           max_tokens, seed, stream):
+                if kind == "delta":
+                    round_text += payload
+                    yield ev("reasoning_delta", text=payload)
+                else:
+                    info = payload
+            prompt += round_text
+            comp_tokens += info.get("completion_tokens") or 0
+            truncated = truncated or info.get("finish_reason") == "length"
+            code = last_code(round_text)
+            if code is None or not code.strip():  # no fresh code (or empty ``` fence) -> done
+                break
+            yield ev("code", lang="python", code=code.strip())
+            out = run(code)                        # run the original (unstripped) block
+            prompt += f"{OUT_OPEN}\n{out}\n{CLOSE}\n"
+            yield ev("tool_result", output=out)
+        yield ev("final_answer", boxed=extract_boxed(prompt), transcript=prompt,
+                 elapsed_s=round(time.time() - t0, 1), completion_tokens=comp_tokens,
+                 truncated=truncated)
+    except Exception as e:  # noqa: BLE001 — surface as an event so the UI never hangs
+        yield ev("error", message=f"{type(e).__name__}: {e}")
+
+
+def solve(problem: str, executor=None, max_calls: int = MAX_CALLS, client: OpenAI | None = None,
+          temperature: float = 0.0, seed: int | None = None, model: str | None = None,
+          max_tokens: int = MAX_TOKENS) -> str:
+    """Blocking TIR solve → full transcript (answer = last \\boxed{...}, via extract_boxed).
+
+    A thin wrapper over `solve_stream` in **non-stream** mode, so `eval.py`/`fanout.py` get
+    byte-identical behavior to before (the streaming path is only for the UI shim).
+    `executor` has `.run(code) -> str` (default: a local `Kernel`); for the remote executor
+    pass `modal.Cls.from_name("pudding-executor", "Executor")()` (the `.remote` adapter is
+    handled). `temperature`>0 + a distinct `seed` per call is what diverges maj@k chains.
+    """
+    transcript = ""
+    for evt in solve_stream(problem, executor=executor, max_calls=max_calls, client=client,
+                            temperature=temperature, seed=seed, model=model,
+                            max_tokens=max_tokens, stream=False):
+        if evt["type"] == "final_answer":
+            transcript = evt["transcript"]
+        elif evt["type"] == "error":
+            raise RuntimeError(evt["message"])  # preserve "raises on failure" for eval/fanout
+    return transcript
 
 
 if __name__ == "__main__":
