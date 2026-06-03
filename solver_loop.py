@@ -180,7 +180,7 @@ def solve_stream(problem: str, executor=None, max_calls: int = MAX_CALLS,
 
     prompt = (f"<|im_start|>system\n{SYS}<|im_end|>\n"
               f"<|im_start|>user\n{problem}<|im_end|>\n<|im_start|>assistant\n")
-    t0, comp_tokens, truncated = time.time(), 0, False
+    t0, comp_tokens, truncated, prev_code = time.time(), 0, False, None
     try:
         for _ in range(max_calls + 1):
             round_text, info = "", {}
@@ -197,6 +197,9 @@ def solve_stream(problem: str, executor=None, max_calls: int = MAX_CALLS,
             code = last_code(round_text)
             if code is None or not code.strip():  # no fresh code (or empty ``` fence) -> done
                 break
+            if code.strip() == prev_code:  # same block again -> no progress; stop, don't burn the budget
+                break
+            prev_code = code.strip()
             yield ev("code", lang="python", code=code.strip())
             out = run(code)                        # run the original (unstripped) block
             prompt += f"{OUT_OPEN}\n{out}\n{CLOSE}\n"

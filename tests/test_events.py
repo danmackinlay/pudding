@@ -108,6 +108,34 @@ def test_solve_wrapper_matches_streamed_transcript():
     assert extract_boxed(transcript) == "143"
 
 
+def test_no_progress_guard_stops_repetition():
+    # A model stuck re-emitting the same block (the GSM8K item-15 pathology) must stop after
+    # one execution, not burn all max_calls rounds.
+    REPEAT = "Try again:\n```python\nprint(1)\n```\n"
+
+    class _RepeatCompletions:
+        def create(self, stream=False, stream_options=None, **kw):
+            if not stream:
+                return _Completion(REPEAT)
+
+            def gen():
+                yield _Chunk(text=REPEAT, finish="stop")
+                yield _Chunk(usage=_Usage())
+            return gen()
+
+    class _RepeatClient:
+        completions = _RepeatCompletions()
+
+    class _AnyExecutor:
+        def run(self, code):
+            return "1"
+
+    events = list(solve_stream("p", executor=_AnyExecutor(), client=_RepeatClient(),
+                               stream=False, max_calls=8))
+    assert _types(events).count("tool_result") == 1, _types(events)  # ran once, then no-progress break
+    assert events[-1]["type"] == "final_answer"
+
+
 def test_error_becomes_event():
     class _Boom:
         def create(self, **kw):
