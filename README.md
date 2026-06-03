@@ -23,20 +23,39 @@ The prover is the solver with three changes: the executor becomes a Lean verifie
 
 ## Status
 
-Scaffold + handoff spec. **None of this has been run against live Modal/Lean infrastructure yet** — the `lean_image` build in particular is researched-but-untested. Read `PLAN.md` before executing; build the solver first (it has no Lean dependency), then the prover. `PLAN.md` carries the research findings with sources so you don't re-derive them.
+**The solver spine is verified end-to-end** against a live metered endpoint (Featherless)
+and a Modal-hosted executor: the TIR loop, the local IPython `Kernel` (state persists,
+errors captured), the remote-executor swap, and `eval.py` over the §9.4 staircase all run
+(3/4 — the one miss is a model trap, see below). The **prover is stage 2** and untested;
+its research is frozen in `PROVER_RESEARCH_ADDENDUM.md` (which corrects two guesses in
+`PLAN.md` — there's a prebuilt Kimina image, so no multi-hour `lean_image` build). Read
+`PLAN.md` before executing.
+
+> Known model quirk (not a pipeline bug): Qwen2.5-Math-7B *and* 72B answer `7^999 mod 1000`
+> as `43` even though the kernel correctly returns `143` — and maj@8 is unanimously wrong,
+> so it's a systematic "won't trust the tool" error. The other staircase problems pass.
+
+## Setup
+
+Secrets live in `.env` (git-ignored); `.envrc` (`dotenv`) makes **direnv** load them — get
+a Featherless key into `.env` as `FEATHERLESS_API_KEY=…`, then `direnv allow`. Run scripts
+as `direnv exec . uv run …` (your own shell can drop the prefix; direnv auto-loads on `cd`).
 
 ## Quick start
 
 ```bash
 uv sync
+direnv allow
 
-# solver (the spine — no Lean toolchain needed)
-modal deploy serve.py                       # model server (Qwen2.5-Math by default)
-uv run python solver_loop.py                # drive the TIR loop against a sample problem
-modal deploy executor/modal_executor.py     # optional: remote executor for heavy compute
+# solver (the spine) — metered tokens from Featherless, executor stays local
+direnv exec . uv run python solver_loop.py        # TIR loop on a sample problem
+direnv exec . uv run python eval.py               # grade the 4-problem staircase
+direnv exec . uv run python eval.py --data gsm8k --n 20   # or a benchmark slice
 
-# prover (the extension — needs lean_image; see PLAN.md §4)
-#   edit serve.py: swap MODEL to a prover, redeploy
-modal deploy verifier/modal_verifier.py     # Lean verifier
-uv run python prover_loop.py                # drive the compile-and-retry loop
+# scale out (optional)
+direnv exec . uv run modal deploy executor/modal_executor.py  # remote executor (heavy compute)
+direnv exec . uv run modal run fanout.py --k 8                # maj@k over Modal .map
+#   self-host the model instead of metering:  modal deploy serve.py  +  set SOLVER_BASE_URL
+
+# prover (stage 2 — see PROVER_RESEARCH_ADDENDUM.md; uses a prebuilt Kimina image)
 ```

@@ -35,7 +35,7 @@ def extract_proof(text: str) -> str | None:
 
 
 def make_client() -> OpenAI:
-    # Point base_url at the Modal serve.py URL, or a metered endpoint (DeepInfra/Novita)
+    # Point base_url at the Modal serve.py URL, or a metered endpoint (Novita)
     # for the 671B — the orchestrator doesn't care where the tokens come from.
     return OpenAI(
         base_url=os.environ.get("PROVER_BASE_URL", "http://localhost:8000/v1"),

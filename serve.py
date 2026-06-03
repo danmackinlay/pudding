@@ -23,7 +23,8 @@ GPU = "L40S"        # 7B fits; use "H100" for the 72B
 #   MAX_LEN = 32768                                 # proof + CoT plan; ~40k for self-correction
 #   GPU     = "H100"
 # ...or skip self-hosting entirely and point prover_loop.py at
-# DeepSeek-Prover-V2-671B on DeepInfra/Novita (the cheapest entry point, per the post).
+# DeepSeek-Prover-V2-671B on Novita (the cheapest entry point, per the post):
+# OpenAI-compatible at https://api.novita.ai/openai, ~$0.7/$2.5 per 1M tokens.
 
 image = (
     modal.Image.debian_slim()

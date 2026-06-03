@@ -95,7 +95,7 @@ Toolchain via **`elan`**. Building Mathlib from source compiles 2500+ files and 
 
 **Solver (the spine):**
 1. [ ] `serve.py` deploys; an OpenAI client gets a completion from Qwen2.5-Math-7B (cheapest). Confirm it emits a ```` ```python ```` fence.
-2. [ ] `solver_loop.py` end-to-end against a local `Kernel` on the sample (`7^999 mod 1000`): generate → run code → splice ```` ```output ```` → continue → `\boxed{}`. Confirm kernel state persists across blocks.
+2. [ ] `solver_loop.py` end-to-end against a local `Kernel` on the sample (`7^999 mod 1000`): generate → run code → splice ```` ```output ```` → continue → `\boxed{}`. Confirm kernel state persists across blocks. Then run the four-problem staircase, then a handful of GSM8K items — **§9** has the datasets and the grading caveat.
 3. [ ] `executor/modal_executor.py` deploys; swap it in for the local `Kernel` (`executor.run.remote(code)`), loop body unchanged, same answer.
 4. [ ] `fanout.py` maj@k: `.map` 32 chains, each its own executor, one shared endpoint; majority-vote the boxed answers.
 5. [ ] Cost sanity: scale-to-zero idles the GPU between bursts.
@@ -106,7 +106,7 @@ Toolchain via **`elan`**. Building Mathlib from source compiles 2500+ files and 
 8. [ ] Kimina server answers `POST /verify` on a trivial good proof (`theorem t : 1 = 1 := by rfl`) → ok, and a bad one → errors.
 9. [ ] `prover_loop.py` end-to-end on one easy MiniF2F statement: generate → extract → verify → (if errors) feed back → closed proof.
 10. [ ] Self-correction (Goedel-32B): a first-attempt failure closes on round 2.
-11. [ ] Pass@k fan-out: `.map` Pass@8, each with its own verifier; collect the first closing proof. Optionally point the model server at DeepSeek-Prover-V2-671B on DeepInfra instead of self-hosting.
+11. [ ] Pass@k fan-out: `.map` Pass@8, each with its own verifier; collect the first closing proof. Optionally point the model server at DeepSeek-Prover-V2-671B on Novita instead of self-hosting.
 
 ## 6. Why autoformalization is out of the core loop
 
@@ -119,7 +119,7 @@ The solver consumes natural language; the prover consumes a *formal* statement. 
 ## 7. Open questions / future work
 
 - **Frontend (separate research burden — see blog `#frontend`).** Solver UI: Open WebUI renders maths out of the box and has a built-in Python code interpreter (closest to turnkey for the TIR display). Gradio is the lightest programmable surface (config `latex_delimiters` for inline maths). Prover UI: no chat UI renders Lean proof state — embed `lean4web` (https://github.com/leanprover-community/lean4web, live at https://live.lean-lang.org) beside the chat. Mind the streaming-LaTeX flash (buffer until delimiters balance). Out of scope for the core loops; noted so it isn't forgotten.
-- 671B prover off-the-shelf: wire the model-server role to DeepInfra/Novita instead of self-hosting, keep verifier on Modal. Cheapest entry point per the post.
+- 671B prover off-the-shelf: wire the model-server role to Novita (OpenAI-compatible, `https://api.novita.ai/openai`) instead of self-hosting, keep verifier on Modal. Cheapest entry point per the post.
 - Premise selection / `lake exe cache` freshness as Mathlib moves.
 - Whether the Kimina import-header cache helps or hurts when proofs use varied imports.
 
@@ -132,3 +132,68 @@ The solver consumes natural language; the prover consumes a *formal* statement. 
 - `verifier/modal_verifier.py` — `LeanVerifier` Modal class wrapping Kimina Lean Server; `run(proof) -> {ok, errors}`. The `lean_image` is the TODO.
 - `verifier/lean_image_notes.md` — the §4 build recipe, expanded, with exact commands to try.
 - `fanout.py` — `.map` fan-out: solver maj@k and prover Pass@k (same pattern).
+
+## 9. Test problems & evaluation data (solver)
+
+### 9.1 The difficulty ladder — start at the top (easiest)
+
+These are the benchmarks Qwen2.5-Math / OpenMath-Nemotron report against, so we test on the ground they were tuned for.
+
+| Dataset | Difficulty | Answer type | HF id | Checkable? |
+|---|---|---|---|---|
+| **GSM8K** | easiest — grade-school word problems | integer (after `####`) | `openai/gsm8k` | trivially (`==`) |
+| **MATH-500** | competition, 5 levels, 7 subjects | `\boxed{}` LaTeX | `HuggingFaceH4/MATH-500` | needs symbolic equality |
+| **AMC23** | olympiad-lite | integer | `AI-MO/aimo-validation-amc` | `==` |
+| **AIME 24/25** | hard headline number | integer 0–999 | `AI-MO/aimo-validation-aime`, `Maxwell-Jia/AIME_2024` | `==` |
+| OlympiadBench / Minerva | hardest | mixed | — | fiddly |
+
+**Build order:** GSM8K first (a failure points at the loop — fence parsing, kernel state, stop tokens — not at a stumped model), then MATH Level 1, then up the ladder.
+
+### 9.2 Grading is a second problem hiding behind the first
+
+Integer-answer sets (GSM8K, AMC, AIME) grade with `extract_boxed(...) == gold` — done. **MATH answers are LaTeX**, where `\frac{1}{2}`, `0.5`, and `0.50` are all correct, so a string compare scores right answers wrong. That needs symbolic equivalence: [`math_verify`](https://github.com/huggingface/Math-Verify) (HF) or a sympy normalizer. **So keep the earliest tests on integer-answer sets**, and only add the symbolic checker once the loop itself is trusted.
+
+### 9.3 How to pull them
+
+1. **Hugging Face directly** — ids above, via `datasets.load_dataset(...)`. NB the *original* full `hendrycks/competition_math` was DMCA'd off HF; use **MATH-500** or a lighteval mirror.
+2. **NeMo-Skills `prepare_data`** (preferred) — `ns prepare_data gsm8k math aime24 amc23 …` downloads them **and bundles the math grader**, in the prompt/answer format these loops expect. Since we're NeMo-Skills-adjacent, this hands us §9.2's grader for free.
+
+### 9.4 Inline starter staircase (known answers, no dataset needed)
+
+Four self-checking problems, easy → less-easy, all clean integers — for a first run before wiring a loader. All four hand-verified:
+
+| Problem | Answer | Tests |
+|---|---|---|
+| `Find the remainder when 7^999 is divided by 1000.` | **143** | forces `pow(7,999,1000)` — a real TIR move |
+| `Natalia sold clips to 48 friends in April, then half as many in May. How many clips did she sell altogether?` | **72** | the canonical first GSM8K problem |
+| `What is the value of \sqrt{36+64} - \sqrt{25-16}?` | **7** | MATH Level-1 flavour |
+| `How many positive integers less than 1000 are divisible by neither 5 nor 7?` | **686** | inclusion–exclusion; brute-forceable |
+
+### 9.5 What to add to the repo (TODO)
+
+- `samples.jsonl` — the four problems above (`{"problem", "answer"}`), plus a small `load_gsm8k()` / `load_math500()` stub using `datasets`.
+- `eval.py` — run `solver_loop.solve` over a set, pull `extract_boxed`, grade integers with `==`; leave a commented `math_verify` hook for MATH. Report accuracy (and maj@k accuracy via `fanout.py`).
+- Wire `eval.py` into §5 step 2.
+
+## 10. Parallel sampling / maj@k width
+
+**The lever.** maj@k wants `k` completions per problem. The efficient form is **server-side parallel sampling** — `n>1`: one request returns `k` choices, and the engine computes the prompt prefill *once* and decodes the `k` sequences in parallel against a shared KV cache. Distinct from "parallel/speculative decoding" (Medusa etc.), which is a *single-sequence latency* trick — we want the former.
+
+**Who offers it** (verified against provider docs, 2026-06):
+
+| Path | `n>1`? | Efficient (shared prefill)? | Marginal cost of the k samples |
+|---|---|---|---|
+| **Self-host vLLM / SGLang** | ✅ first-class (`SamplingParams.n`; SGLang RadixAttention fork) | ✅ prefill once, decode n on shared KV | GPU-time only — the real saving |
+| **Novita** | ✅ documented, `n` 1–128 | server-side, opaque | billed per output token for all n |
+| **Together / Fireworks / OpenAI** | ✅ documented | opaque | billed for all n (latency-only win) |
+| **OpenRouter** | ❌ silently dropped → 1 choice | — | n/a |
+| **Featherless** | ❌ no chat `n` (prompt-array on `/v1/completions` only, counts against concurrency) | — | flat-rate but **concurrency-capped** |
+
+Sources: vLLM `SamplingParams` (https://docs.vllm.ai/en/latest/api/vllm/sampling_params.html) + APC; SGLang RadixAttention (https://lmsys.org/blog/2024-01-17-sglang/); Novita `n` (https://novita.ai/docs/api-reference/model-apis-llm-create-chat-completion); OpenRouter drop-to-1 (https://github.com/OpenRouterTeam/openrouter-runner/issues/99); Featherless concurrency tiers (https://featherless.ai/docs/concurrency-limits — Premium = 4).
+
+**The catch.** Shared prefill only amortizes the *prompt*. Decoding `k` long CoT-plus-code traces is never shared and never gets cheaper; for maths the trace dwarfs the prompt, so even at best `n>1` buys latency/concurrency, not cost. On per-token APIs you pay for all `n` outputs regardless.
+
+**What this means for `fanout.py`.** The current default (Featherless, `ENDPOINT_CONCURRENCY = 4`) is the *weakest* case: no `n`, and maj@k width is bounded by the plan's concurrency (Premium = 4 — `.map` wider gets 429s). Options, cleanest first:
+1. **Self-host `serve.py` (vLLM)** — `n=k` in one request (or rely on `@modal.concurrent` batching). The only path with `n>1` *and* the prefill saving. The repo already supports it via `SOLVER_BASE_URL`.
+2. **Novita for the solver** *iff* it lists the Qwen2.5-Math models (catalogue check — we have a Novita key for the prover). `n` ≤128 sidesteps the per-request concurrency cap; still per-token.
+3. **Stay on Featherless** for single-shot dev; accept maj@k is concurrency-bound to the tier.
