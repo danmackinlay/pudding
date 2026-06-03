@@ -1,12 +1,13 @@
-"""Orchestrator: the compile-and-retry loop.
+"""Orchestrator (EXTENSION of solver_loop.py): the compile-and-retry loop.
 
-The solver's TIR loop stops when the model emits no fresh code. The prover's loop
-stops when the *compiler* accepts the proof, and on failure feeds the compiler errors
-back in place of a tool result (this IS Goedel-Prover-V2's self-correction). The only
-new role vs the solver is the verifier — a `run(proof) -> {ok, errors}` box that runs
-Lean instead of Python (see verifier/modal_verifier.py).
+Build and test the solver (solver_loop.py) first — this reuses its skeleton. The TIR
+solver stops when the model emits no fresh code; the prover stops when the *compiler*
+accepts the proof, and on failure feeds the compiler errors back in place of a tool
+result (this IS Goedel-Prover-V2's self-correction). The only role that changes vs the
+solver is the executor → a verifier: a `run(proof) -> {ok, errors}` box that runs Lean
+instead of Python (see verifier/modal_verifier.py). The token budget also grows.
 
-UNTESTED end-to-end. See PLAN.md §5 for the testing order.
+UNTESTED end-to-end. See PLAN.md §5 for the testing order (the prover is steps 6–11).
 """
 import os
 import re

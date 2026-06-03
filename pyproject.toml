@@ -1,12 +1,14 @@
 [project]
 name = "pudding"
 version = "0.0.0"
-description = "A Lean 4 prover pipeline on Modal: GPU-served prover, CPU Lean verifier, local compile-and-retry loop."
+description = "Maths-reasoning LLMs on Modal: a TIR solver (the spine) and a Lean prover extension, sharing one model-server/executor-or-verifier/orchestrator skeleton."
 requires-python = ">=3.11"
 dependencies = [
     "modal>=0.64",
     "openai>=1.0",
-    "kimina-client",   # client for the Kimina Lean Server (the verifier)
+    "jupyter_client",  # local IPython kernel = the solver's executor
+    "ipykernel",       # the kernel the solver runs code in
+    # "kimina-client",   # client for the Kimina Lean Server = the prover's verifier
 ]
 
 # Versions are starting guesses — see PLAN.md. Nothing here has been run yet.
