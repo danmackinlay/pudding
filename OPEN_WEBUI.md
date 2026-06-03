@@ -57,6 +57,21 @@ Prose with rendered LaTeX (`\(…\)`, `\boxed{…}`), a `​```python​` block,
 footer. Tokens stream live (the model is ~28 tok/s on Featherless, so a problem takes
 ~10–40s — streaming makes the wait legible).
 
+## Effort presets (per-problem budget)
+
+The model menu shows three ids — all the **same** model (`tir-solver`), differing only in
+token/round budget (effort is per-problem; pick from the menu per chat):
+
+| Model id | max_tokens / round | max rounds | use for |
+|---|---|---|---|
+| `tir-solver` | 8192 | 8 | default |
+| `tir-solver-deep` | 24000 | 12 | reasoning-heavy problems, or after a `⚠ truncated` footer |
+| `tir-solver-fast` | 2048 | 4 | quick / cheap |
+
+If a solve shows `⚠ truncated — retry with tir-solver-deep` in its footer, it ran out of
+budget mid-answer; switch to the deep preset. (maj@k is *not* a preset — it's batch-only:
+`eval.py --k`.)
+
 ## Docker / OrbStack fallback
 If you prefer a container (loses native localhost reach, needs `host.docker.internal`):
 ```

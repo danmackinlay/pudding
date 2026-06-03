@@ -24,28 +24,36 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from solver_loop import solve_stream, Kernel, MODEL
 from streaming import LatexSafeBuffer, normalize_delimiters
 
-MODEL_ID = "tir-solver"  # what the frontend shows / sends; the real model is SOLVER_MODEL
 SOLVER_MODEL = os.environ.get("SOLVER_MODEL", MODEL)
+
+# Per-problem effort exposed as model-id presets — Open WebUI's clean per-message knob
+# (PLAN.md §1.6). All drive the SAME underlying SOLVER_MODEL; only the token/round budget
+# differs. (maj@k is NOT here — batch-only: eval.py/fanout.py.)
+DEFAULT_MODEL_ID = "tir-solver"
+EFFORT_PRESETS = {
+    "tir-solver":      {"max_tokens": 8192,  "max_calls": 8},   # default
+    "tir-solver-deep": {"max_tokens": 24000, "max_calls": 12},  # reasoning-heavy / was truncated
+    "tir-solver-fast": {"max_tokens": 2048,  "max_calls": 4},   # quick & cheap
+}
 
 app = FastAPI(title="pudding TIR shim")
 
 
 @app.get("/v1/models")
 def list_models():
-    # A single streamed-chain solver. (A `tir-solver-deep` effort preset could be added
-    # later — bigger budget, NOT maj@k, which lives in eval.py/fanout.py.)
     return {"object": "list", "data": [
-        {"id": MODEL_ID, "object": "model", "owned_by": "pudding"},
+        {"id": mid, "object": "model", "owned_by": "pudding"} for mid in EFFORT_PRESETS
     ]}
 
 
-def _render_pieces(problem: str):
+def _render_pieces(problem: str, max_tokens: int, max_calls: int):
     """Yield human-facing content pieces for one solve: FOIM-buffered prose, fenced code &
     tool output, and a time/token footer. Shared by the streaming and non-streaming paths."""
     buf = LatexSafeBuffer()
     kern = Kernel()
     try:
-        for e in solve_stream(problem, executor=kern, model=SOLVER_MODEL, stream=True):
+        for e in solve_stream(problem, executor=kern, model=SOLVER_MODEL, stream=True,
+                              max_tokens=max_tokens, max_calls=max_calls):
             t = e["type"]
             if t == "reasoning_delta":
                 safe = buf.feed(e["text"])
@@ -64,7 +72,7 @@ def _render_pieces(problem: str):
                     yield normalize_delimiters(tail)
                 footer = f"\n\n— ⏱ {e['elapsed_s']}s · {e['completion_tokens']} tok"
                 if e["truncated"]:
-                    footer += " · ⚠ truncated (raise effort)"
+                    footer += " · ⚠ truncated — retry with `tir-solver-deep`"
                 yield footer
             elif t == "error":
                 tail = buf.flush()
@@ -95,8 +103,9 @@ def _chunk(content, *, model, role=False, finish=None):
 @app.post("/v1/chat/completions")
 async def chat_completions(body: dict):
     messages = body.get("messages", [])
-    model = body.get("model", MODEL_ID)
+    model = body.get("model", DEFAULT_MODEL_ID)
     stream = body.get("stream", False)
+    eff = EFFORT_PRESETS.get(model, EFFORT_PRESETS[DEFAULT_MODEL_ID])  # per-problem effort
     # The last user turn is the problem (each message = a fresh problem; solver is stateless).
     problem = next((m.get("content", "") for m in reversed(messages)
                     if m.get("role") == "user"), "")
@@ -104,13 +113,13 @@ async def chat_completions(body: dict):
     if stream:
         def sse():
             yield _chunk(None, model=model, role=True)
-            for piece in _render_pieces(problem):
+            for piece in _render_pieces(problem, eff["max_tokens"], eff["max_calls"]):
                 yield _chunk(piece, model=model)
             yield _chunk(None, model=model, finish="stop")
             yield "data: [DONE]\n\n"
         return StreamingResponse(sse(), media_type="text/event-stream")
 
-    content = "".join(_render_pieces(problem))
+    content = "".join(_render_pieces(problem, eff["max_tokens"], eff["max_calls"]))
     return JSONResponse({
         "id": "chatcmpl-pudding", "object": "chat.completion",
         "created": int(time.time()), "model": model,

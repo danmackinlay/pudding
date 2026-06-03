@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import shim
 
 
-def _fake_solve_stream(problem, executor=None, model=None, stream=True):
+def _fake_solve_stream(problem, executor=None, model=None, stream=True, **kw):
     # The model's prose carries the ```python block (as real models do); the `code` event is
     # structural-only and must NOT be re-rendered.
     yield {"type": "reasoning_delta", "text": "Compute:\n```python\nprint(143)\n```\n"}
@@ -44,10 +44,28 @@ def _client(monkeypatch=None):
     return TestClient(shim.app)
 
 
-def test_models_endpoint():
+def test_models_endpoint_lists_effort_presets():
     c = _client()
-    data = c.get("/v1/models").json()
-    assert data["data"][0]["id"] == "tir-solver"
+    ids = {m["id"] for m in c.get("/v1/models").json()["data"]}
+    assert {"tir-solver", "tir-solver-deep", "tir-solver-fast"} <= ids
+
+
+def test_effort_preset_threads_budget():
+    # Requesting an effort preset must reach solve_stream as the right max_tokens/max_calls.
+    seen = {}
+
+    def _spy(problem, executor=None, model=None, stream=True, **kw):
+        seen.update(kw)
+        yield from _fake_solve_stream(problem)
+
+    shim.solve_stream = _spy  # type: ignore[assignment]
+    shim.Kernel = _FakeKernel  # type: ignore[assignment]
+    from fastapi.testclient import TestClient
+    TestClient(shim.app).post("/v1/chat/completions", json={
+        "model": "tir-solver-deep", "stream": False,
+        "messages": [{"role": "user", "content": "q"}],
+    })
+    assert seen.get("max_tokens") == 24000 and seen.get("max_calls") == 12
 
 
 def _collect_stream(resp_text):
