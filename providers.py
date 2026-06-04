@@ -57,6 +57,10 @@ PROVIDERS: dict[str, Provider] = {
     "deepinfra": Provider(
         "deepinfra", "https://api.deepinfra.com/v1/openai", ("DEEPINFRA_API_KEY",),
         supports_n=True, notes="per-token; hosts Kimi K2.6 / Qwen3 / DeepSeek"),
+    # local Ollama OpenAI-compat endpoint (set up later, e.g. a local Nemotron). No key needed.
+    "ollama": Provider(
+        "ollama", "http://localhost:11434/v1", ("OLLAMA_API_KEY",),
+        supports_n=False, notes="local Ollama OpenAI-compat (e.g. Nemotron); no key; n unsupported"),
     # self-hosted vLLM/SGLang (serve.py): the only path with n>1 AND shared-prefill saving.
     "selfhost": Provider(
         "selfhost", os.environ.get("SOLVER_BASE_URL", "http://localhost:8000/v1"),

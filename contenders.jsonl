@@ -1,10 +1,14 @@
 # audition lineup — one JSON object per line: {provider, model, strategy, label?}
-# '#' lines are ignored. EDIT model slugs to your OpenRouter catalogue picks.
-# strategy ∈ tir_fence (specialist) | cot | self_verify | tools(gated)
-# providers: featherless (specialists) | openrouter (generalists) | novita | selfhost
-{"provider": "featherless", "model": "nvidia/OpenMath-Nemotron-32B", "strategy": "tir_fence", "label": "OpenMath-Nemotron-32B · TIR"}
+# '#' lines are ignored.  strategy ∈ tir_fence (specialist, Qwen ```python fences) | cot | self_verify | tools(gated)
+# providers: featherless (specialists) | openrouter (generalists) | ollama (local, later) | novita | selfhost
+{"provider": "featherless", "model": "Qwen/Qwen2.5-Math-72B-Instruct", "strategy": "tir_fence", "label": "Qwen2.5-Math-72B · TIR"}
 {"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "cot", "label": "Kimi-K2.6 · CoT"}
 {"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "self_verify", "label": "Kimi-K2.6 · self-verify"}
-# add your own, e.g. (verify exact slugs on openrouter.ai/models):
-# {"provider": "openrouter", "model": "qwen/qwen3-235b-a22b-thinking", "strategy": "cot", "label": "Qwen3-235B-Thinking · CoT"}
-# {"provider": "openrouter", "model": "deepseek/deepseek-chat-v3.1", "strategy": "cot", "label": "DeepSeek-V3.1 · CoT"}
+{"provider": "openrouter", "model": "deepseek/deepseek-v4-pro", "strategy": "cot", "label": "DeepSeek-V4-Pro · CoT"}
+{"provider": "openrouter", "model": "qwen/qwen3.7-max", "strategy": "cot", "label": "Qwen3.7-Max · CoT"}
+# extend to compare rung 1 vs rung 2 per model, e.g.:
+# {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro", "strategy": "self_verify", "label": "DeepSeek-V4-Pro · self-verify"}
+# {"provider": "openrouter", "model": "qwen/qwen3.7-max", "strategy": "self_verify", "label": "Qwen3.7-Max · self-verify"}
+# local Nemotron via ollama (after you set it up). NB OpenMath-Nemotron emits <tool_call> tags,
+# NOT the Qwen fences tir_fence parses — run it as cot, or parametrize the tags first:
+# {"provider": "ollama", "model": "nemotron", "strategy": "cot", "label": "Nemotron (local) · CoT"}

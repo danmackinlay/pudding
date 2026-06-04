@@ -24,12 +24,16 @@ GENERALIST = {"cot", "self_verify", "tools"}
 # Fallback lineup if contenders.jsonl is absent. EDIT slugs to taste (these are starting points;
 # kimi-k2.6 is a confirmed OpenRouter slug, the specialist one is on Featherless).
 DEFAULT_CONTENDERS = [
-    {"provider": "featherless", "model": "nvidia/OpenMath-Nemotron-32B",
-     "strategy": "tir_fence", "label": "OpenMath-Nemotron-32B · TIR"},
+    {"provider": "featherless", "model": "Qwen/Qwen2.5-Math-72B-Instruct",
+     "strategy": "tir_fence", "label": "Qwen2.5-Math-72B · TIR"},
     {"provider": "openrouter", "model": "moonshotai/kimi-k2.6",
      "strategy": "cot", "label": "Kimi-K2.6 · CoT"},
     {"provider": "openrouter", "model": "moonshotai/kimi-k2.6",
      "strategy": "self_verify", "label": "Kimi-K2.6 · self-verify"},
+    {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro",
+     "strategy": "cot", "label": "DeepSeek-V4-Pro · CoT"},
+    {"provider": "openrouter", "model": "qwen/qwen3.7-max",
+     "strategy": "cot", "label": "Qwen3.7-Max · CoT"},
 ]
 
 

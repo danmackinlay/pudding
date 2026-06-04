@@ -236,7 +236,7 @@ if __name__ == "__main__":
                     choices=["tir_fence", "cot", "self_verify", "tools"],
                     help="the rung: tir_fence (specialist) | cot | self_verify | tools")
     ap.add_argument("--provider", default=None,
-                    help="featherless | openrouter | novita | moonshot | deepinfra | selfhost")
+                    help="featherless | openrouter | novita | moonshot | deepinfra | ollama | selfhost")
     ap.add_argument("--model", default=None, help="model id (required for generalist strategies)")
     ap.add_argument("--max-tokens", type=int, default=None, help="per-round budget")
     ap.add_argument("--max-calls", type=int, default=None, help="max TIR rounds")
