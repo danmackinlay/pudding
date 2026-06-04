@@ -112,6 +112,9 @@ the confidence signal (agreement / self-verify verdict), not just the answer —
 UX. (`shim.py` is currently hard-wired to a local `Kernel` + the TIR path; generalize it to
 dispatch `strategy`/`provider`/`model` so you can swap and compare live.)
 
+**Full handoff spec → `WORKBENCH_PLAN.md`** — decisions (async-first shim, picker = the lineup,
+trust surface = self-verify verdict + maj@k agreement), build order, contracts, testing checklist.
+
 ## 5. Phase C — the prover spike (GATED parking lot)
 
 **Do NOT build until both gates pass:** (a) you can name a problem you want *bulletproof*, and
