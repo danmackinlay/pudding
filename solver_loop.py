@@ -236,6 +236,30 @@ def solve(problem: str, executor=None, max_calls: int = MAX_CALLS, client: OpenA
     return transcript
 
 
+def solve_one(problem: str, *, executor=None, model: str | None = None,
+              provider: str | None = None, strategy: str = "tir_fence",
+              temperature: float = 0.0, seed: int | None = None, max_tokens: int = MAX_TOKENS,
+              max_calls: int = MAX_CALLS, client: OpenAI | None = None) -> dict:
+    """One chain → a detailed result dict, the cost-aware sibling of `solve()`:
+    {boxed, transcript, completion_tokens, truncated, elapsed_s, error}. Surfaces token usage
+    (the per-token $ signal) and never raises — failures land in result['error']. The audition
+    (eval.py / audition.py) uses this; `solve()` stays for fanout's transcript contract."""
+    result = {"boxed": None, "transcript": "", "completion_tokens": 0,
+              "truncated": False, "elapsed_s": 0.0, "error": None}
+    for evt in solve_stream(problem, executor=executor, max_calls=max_calls, client=client,
+                            temperature=temperature, seed=seed, model=model,
+                            max_tokens=max_tokens, stream=False, strategy=strategy,
+                            provider=provider):
+        if evt["type"] == "final_answer":
+            result.update(boxed=evt.get("boxed"), transcript=evt.get("transcript", ""),
+                          completion_tokens=evt.get("completion_tokens") or 0,
+                          truncated=bool(evt.get("truncated")),
+                          elapsed_s=evt.get("elapsed_s") or 0.0)
+        elif evt["type"] == "error":
+            result["error"] = evt["message"]
+    return result
+
+
 if __name__ == "__main__":
     # Smoke test against a local kernel (needs jupyter_client + ipykernel installed).
     import sys

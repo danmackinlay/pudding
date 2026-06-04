@@ -6,6 +6,7 @@ uv.lock
 *.olean
 .lake/
 _tmp/
+results/
 .env
 .envrc
 .vscode/

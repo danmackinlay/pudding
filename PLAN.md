@@ -65,7 +65,7 @@ contender* you could plug in behind `solve()`. We do **not** write a universal m
 **Goal:** a table of (model × strategy × provider) → accuracy / cost / agreement on real
 benchmarks, so the numbers pick the engine and kill the dead rungs.
 
-**Built this increment** (all green, `tests/test_strategies.py` + existing suite, 24 passed):
+**Built** (all green, `tests/test_strategies.py` + existing suite, 26 passed):
 - `providers.py` — provider registry (base_url, key envs, `n>1` support). Confirmed: featherless,
   novita, selfhost. Likely/overridable on first 401/404: moonshot (Kimi), openrouter, deepinfra.
 - `strategies.py` — `cot` (rung 1) and `self_verify` (rung 2): chat-endpoint, no executor, emit
@@ -75,28 +75,27 @@ benchmarks, so the numbers pick the engine and kill the dead rungs.
   `tir_fence` path is byte-identical (verified by the unchanged tests).
 - `eval.py --provider --strategy` + integer-answer loaders (gsm8k, amc23, aime24).
 
-**Run the audition:**
+**Run the audition** — the whole lineup at once (edit `contenders.jsonl`), or one cell via `eval.py`:
 ```bash
-# incumbent specialist (metered tokens, local kernel)
-eval.py --provider featherless --model OpenMath-Nemotron-32B --strategy tir_fence  --data aime24 --k 8
-# generalist, chain-of-thought (rung 1)
-eval.py --provider moonshot    --model kimi-k2.6                       --strategy cot         --data aime24 --k 8
-# generalist, self-verification (rung 2)
-eval.py --provider deepinfra   --model Qwen/Qwen3-235B-A22B-Thinking   --strategy self_verify --data amc23  --k 4
+audition.py --data amc23 --n 10 --k 4          # ranked leaderboard: acc · agreement · tok/prob · s/prob
+# one cell at a time:
+eval.py --provider featherless --model nvidia/OpenMath-Nemotron-32B  --strategy tir_fence   --data aime24 --k 8
+eval.py --provider openrouter  --model moonshotai/kimi-k2.6          --strategy cot          --data aime24 --k 8
+eval.py --provider openrouter  --model qwen/qwen3-235b-a22b-thinking --strategy self_verify  --data amc23  --k 4
 ```
 Then the **lane-kill comparison**: the same top model in `cot` vs `self_verify` (vs `tools` once
 built). If tools don't beat plain CoT for a SOTA generalist, that rung dies — as it did for the
 specialist. Generalist runs need a fat token budget (thinking shares `max_tokens`); eval defaults
 to 16384, raise with `--max-tokens` if you see `∅ no_answer`.
 
-**Next increments in Phase A (small, in order):**
-1. **Cost + agreement reporting.** Surface `completion_tokens` (the per-token $ proxy; flat-rate
-   Featherless still uses wall-time) and the maj@k vote margin ("5/8 agree") as the confidence
-   signal. Needs `solve` to return usage alongside the boxed answer (today it returns the
-   transcript only).
-2. **MATH-500 grading** via `math_verify` (LaTeX equality) — `eval.py grade()` has the hook.
-3. Optional: drive headline numbers through **lighteval / lm-eval-harness / NeMo-Skills** for
-   contamination-checked, publishable figures; keep `eval.py` for the staircase + dev loop.
+**Done since the seam:** `audition.py` (matrix runner → ranked leaderboard with **cost +
+agreement**), `solve_one` (per-chain token usage), OpenRouter wired as the generalist provider,
+lineup editable in `contenders.jsonl`, results logged under `results/`.
+
+**Next increments in Phase A:**
+1. **MATH-500 grading** via `math_verify` (LaTeX equality) — `eval.py grade()` has the hook.
+2. Optional: drive headline numbers through **lighteval / lm-eval-harness / NeMo-Skills** for
+   contamination-checked, publishable figures; keep `eval.py`/`audition.py` for the dev loop.
    (Don't re-implement graders — 2026 best practice is to plug into one.)
 
 ## 4. Phase B — the workbench (build around the winner)
@@ -175,8 +174,10 @@ contract, DeepSeek-/Goedel-Prover-V2 prompt template, version-match risks, Novit
 
 - `providers.py` — **NEW**: provider registry (model-server axis); `make_client(provider)`.
 - `strategies.py` — **NEW**: `cot` / `self_verify` generalist rungs; `tools` gated. Chat endpoint, shared envelope.
-- `solver_loop.py` — `tir_fence` engine + the strategy dispatch + the shared envelope; local `Kernel`.
-- `eval.py` — the **audition runner**: (model × strategy × provider) → accuracy/time (cost+agreement next).
+- `solver_loop.py` — `tir_fence` engine + the strategy dispatch + the shared envelope + `solve_one` (token usage); local `Kernel`.
+- `audition.py` — **NEW**: matrix runner — sweep `contenders.jsonl` → ranked leaderboard (acc · agreement · tok · time) + JSONL log in `results/`.
+- `eval.py` — one audition cell: (model × strategy × provider) → accuracy + cost + agreement.
+- `contenders.jsonl` — **NEW**: the editable audition lineup (provider/model/strategy per line).
 - `fanout.py` — Modal `.map` fan-out: maj@k (solver) / Pass@k (prover) — the confidence axis at scale.
 - `shim.py` + `streaming.py` — the **workbench surface** (Open WebUI bridge + FOIM delimiter buffer).
 - `serve.py` — optional self-host vLLM (the only cheap wide-maj@k path; `n>1` shared prefill).
@@ -185,8 +186,8 @@ contract, DeepSeek-/Goedel-Prover-V2 prompt template, version-match risks, Novit
 
 ## 8. Status
 
-Phase A seam **built and tested** (network-free): provider registry, `cot`/`self_verify`,
-strategy dispatch, audition loaders. `tir_fence` path unchanged (24 tests pass). **Next action:**
-run the audition (commands in §3) with real keys to get the engine-and-rung table, then Phase B
-(workbench around the winner). Phase C (prover) stays gated until a bulletproof use-case + a UI
-answer exist.
+Phase A **built and tested** network-free (26 tests): provider registry, `cot`/`self_verify`,
+strategy dispatch, `solve_one` (token usage), and `audition.py` (matrix leaderboard with cost +
+agreement). `tir_fence` path unchanged. **Next action:** edit the slugs in `contenders.jsonl`
+and run `audition.py --data amc23 --n 10 --k 4` with real keys to get the engine-and-rung table;
+then Phase B (workbench around the winner). Phase C (prover) stays gated.

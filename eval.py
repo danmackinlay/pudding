@@ -1,25 +1,26 @@
-"""The audition runner — grade (model × strategy × provider) over a problem set.
+"""Single-cell audition runner — grade one (model × strategy × provider) over a problem set.
 
-Runs the chosen strategy on each problem, pulls the last \\boxed{...}, and grades it. This is
-how we pick the engine and kill dead rungs by results (PLAN.md §3): hold the problem set +
-grader constant, vary the contender.
+Reports accuracy, **per-token cost** (the $ proxy; flat-rate providers still read wall-time),
+and for maj@k the **agreement margin** (the confidence signal). This is one cell; `audition.py`
+sweeps a matrix of cells and tabulates. Hold the problem set + grader constant, vary the
+contender (PLAN.md §3).
 
-    # specialist TIR (the incumbent), metered tokens, local kernel
-    eval.py --provider featherless --model OpenMath-Nemotron-32B --strategy tir_fence --data aime24 --k 8
+    # incumbent specialist (metered tokens, local kernel)
+    eval.py --provider featherless --model nvidia/OpenMath-Nemotron-32B --strategy tir_fence --data aime24 --k 8
     # generalist, pure chain-of-thought (rung 1), no executor
-    eval.py --provider moonshot   --model kimi-k2.6              --strategy cot       --data aime24 --k 8
+    eval.py --provider openrouter --model moonshotai/kimi-k2.6 --strategy cot --data aime24 --k 8
     # generalist, self-verification (rung 2)
-    eval.py --provider deepinfra  --model Qwen/Qwen3-235B-A22B-Thinking --strategy self_verify --data amc23 --k 4
+    eval.py --provider openrouter --model qwen/qwen3-235b-a22b-thinking --strategy self_verify --data amc23 --k 4
 
 Integer-answer sets (staircase, GSM8K, AMC, AIME) grade with a normalized `==`. MATH-500 is
-LaTeX → needs symbolic equality; the `math_verify` hook below is the swap point (PLAN.md §6.3).
-Start on integer sets so a failure points at the loop, not the grader.
+LaTeX → needs symbolic equality; the `math_verify` hook in grade() is the swap point. Start on
+integer sets so a failure points at the loop, not the grader.
 """
 import argparse
 import json
 from collections import Counter
 
-from solver_loop import solve, Kernel, extract_boxed
+from solver_loop import Kernel, solve_one
 
 # Rungs whose orchestrator drives a code executor; the rest (cot/self_verify) are executor-free.
 NEEDS_EXECUTOR = {"tir_fence", "tools"}
@@ -60,7 +61,7 @@ def _load_hf(name: str, n: int, problem_key: str = "problem", answer_key: str = 
 
 
 def load_math500(n: int = 20) -> list[dict]:
-    """First n MATH-500 items. NB answers are LaTeX → needs the symbolic grader (§6.3)."""
+    """First n MATH-500 items. NB answers are LaTeX → needs the symbolic grader."""
     return _load_hf("HuggingFaceH4/MATH-500", n, split="test")
 
 
@@ -95,7 +96,7 @@ def _as_number(s: str):
 
 
 def grade(pred: str | None, gold: str) -> bool:
-    """Integer/decimal-aware equality (PLAN.md §6.3). Good for GSM8K/AMC/AIME/staircase.
+    """Integer/decimal-aware equality. Good for GSM8K/AMC/AIME/staircase.
 
     MATH is LaTeX (\\frac{1}{2} == 0.5 == 0.50) — swap in a symbolic checker there:
         from math_verify import parse, verify
@@ -109,65 +110,88 @@ def grade(pred: str | None, gold: str) -> bool:
     return pred.strip() == gold.strip()
 
 
+def _mean(xs: list[float]) -> float:
+    return sum(xs) / len(xs) if xs else 0.0
+
+
 # --- run -------------------------------------------------------------------
 def solve_graded(problem: str, k: int, model: str | None, *, strategy: str = "tir_fence",
                  provider: str | None = None, max_tokens: int | None = None,
-                 max_calls: int | None = None) -> str | None:
-    """Greedy single shot (k==1) or local maj@k (k>1). Returns the (voted) boxed answer.
+                 max_calls: int | None = None) -> dict:
+    """Greedy single shot (k==1) or local maj@k (k>1) → {pred, tokens, agreement, truncated}.
 
-    Only executor-driven strategies (tir_fence/tools) get a Kernel; cot/self_verify are pure
-    chat calls. Each chain's kernel is shut down so a long eval doesn't leak kernels.
+    `tokens` is the summed completion-token cost over all k chains; `agreement` is the winning
+    vote fraction (the confidence signal; None at k==1). Only tir_fence/tools get a Kernel.
     """
-    kw = {"strategy": strategy, "provider": provider}
+    budget = {}
     if max_tokens is not None:
-        kw["max_tokens"] = max_tokens
+        budget["max_tokens"] = max_tokens
     if max_calls is not None:
-        kw["max_calls"] = max_calls
+        budget["max_calls"] = max_calls
     needs = strategy in NEEDS_EXECUTOR
 
-    def one(seed=None, temperature=0.0) -> str | None:
+    def one(seed=None, temperature=0.0) -> dict:
         kern = Kernel() if needs else None
         try:
-            return extract_boxed(solve(problem, executor=kern, model=model,
-                                       temperature=temperature, seed=seed, **kw))
+            return solve_one(problem, executor=kern, model=model, provider=provider,
+                             strategy=strategy, temperature=temperature, seed=seed, **budget)
         finally:
             if kern is not None:
                 kern.km.shutdown_kernel(now=True)
 
     if k <= 1:
-        return one()
-    answers = [a for s in range(k) if (a := one(seed=s, temperature=0.6))]
-    return Counter(answers).most_common(1)[0][0] if answers else None
+        r = one()
+        return {"pred": r["boxed"], "tokens": r["completion_tokens"],
+                "agreement": None, "truncated": r["truncated"]}
+
+    results = [one(seed=s, temperature=0.6) for s in range(k)]
+    tokens = sum(r["completion_tokens"] for r in results)
+    truncated = any(r["truncated"] for r in results)
+    answers = [r["boxed"] for r in results if r["boxed"]]
+    if not answers:
+        return {"pred": None, "tokens": tokens, "agreement": 0.0, "truncated": truncated}
+    winner, count = Counter(answers).most_common(1)[0]
+    return {"pred": winner, "tokens": tokens, "agreement": count / len(answers),
+            "truncated": truncated}
 
 
 def evaluate(problems: list[dict], k: int = 1, model: str | None = None, *,
              strategy: str = "tir_fence", provider: str | None = None,
              max_tokens: int | None = None, max_calls: int | None = None,
-             timeout: float | None = None) -> float:
-    """Grade `problems`, printing a per-item line and a status breakdown.
+             timeout: float | None = None, verbose: bool = True) -> dict:
+    """Grade `problems`; print a status breakdown + cost/agreement; return a metrics dict.
 
-    A per-problem wall-clock `timeout` keeps the run tractable: a single runaway reports
-    `timeout` and the eval moves on. Status: ok | wrong | no_answer | timeout | error.
+    Returns {acc, n, counts, mean_time, mean_tokens, total_tokens, mean_agreement} so the
+    matrix runner (audition.py) can tabulate. `verbose=False` suppresses per-item lines.
+    A per-problem wall-clock `timeout` keeps a runaway from stalling the sweep.
     """
     import concurrent.futures as cf
     import time
 
     counts = {"ok": 0, "wrong": 0, "no_answer": 0, "timeout": 0, "error": 0}
     times: list[float] = []
+    toks: list[int] = []
+    agrees: list[float] = []
     sweep_t0 = time.time()
     for i, item in enumerate(problems, 1):
-        pred, status, t0 = None, None, time.time()
+        res, status, t0 = None, None, time.time()
         with cf.ThreadPoolExecutor(max_workers=1) as ex:
             fut = ex.submit(solve_graded, item["problem"], k, model, strategy=strategy,
                             provider=provider, max_tokens=max_tokens, max_calls=max_calls)
             try:
-                pred = fut.result(timeout=timeout)
+                res = fut.result(timeout=timeout)
             except cf.TimeoutError:
                 status = "timeout"
             except Exception as e:  # noqa: BLE001 — surface, don't crash the sweep
-                status, pred = "error", f"{type(e).__name__}: {e}"[:40]
+                status = "error"
+                res = {"pred": f"{type(e).__name__}: {e}"[:40], "tokens": 0, "agreement": None}
         elapsed = time.time() - t0
         times.append(elapsed)
+        res = res or {"pred": None, "tokens": 0, "agreement": None}
+        pred = res.get("pred")
+        toks.append(res.get("tokens") or 0)
+        if k > 1 and res.get("agreement") is not None:
+            agrees.append(res["agreement"])
         if status is None:
             if grade(pred, item["answer"]):
                 status = "ok"
@@ -176,26 +200,30 @@ def evaluate(problems: list[dict], k: int = 1, model: str | None = None, *,
             else:
                 status = "wrong"
         counts[status] += 1
-        mark = {"ok": "✓", "wrong": "✗", "no_answer": "∅", "timeout": "⏱", "error": "!"}[status]
-        prob = item["problem"][:50] + ("…" if len(item["problem"]) > 50 else "")
-        print(f"{mark} [{i:>3}/{len(problems)}] {status:<9} {elapsed:5.1f}s "
-              f"pred={str(pred):<10} gold={item['answer']:<8} {prob}", flush=True)
+        if verbose:
+            mark = {"ok": "✓", "wrong": "✗", "no_answer": "∅", "timeout": "⏱", "error": "!"}[status]
+            prob = item["problem"][:48] + ("…" if len(item["problem"]) > 48 else "")
+            print(f"{mark} [{i:>3}/{len(problems)}] {status:<9} {elapsed:5.1f}s "
+                  f"{res.get('tokens') or 0:>6}tok pred={str(pred):<10} "
+                  f"gold={item['answer']:<8} {prob}", flush=True)
 
     n = len(problems)
     acc = counts["ok"] / n if n else 0.0
     tag = f"maj@{k}" if k > 1 else "greedy"
-    wall = time.time() - sweep_t0
-    mean = sum(times) / len(times) if times else 0.0
+    mean_agreement = _mean(agrees) if agrees else None
+    metrics = {"acc": acc, "n": n, "counts": counts, "mean_time": _mean(times),
+               "mean_tokens": _mean(toks), "total_tokens": sum(toks),
+               "mean_agreement": mean_agreement}
     print("=" * 72)
     print(f"accuracy ({tag}): {counts['ok']}/{n} = {acc:.1%}   "
           f"| wrong={counts['wrong']} no_answer={counts['no_answer']} "
           f"timeout={counts['timeout']} error={counts['error']}")
-    # Time as a first-class diagnostic (generation-bound vs loop-bound is invisible otherwise).
-    # NEXT (PLAN.md §3): per-token cost (completion_tokens) + maj@k agreement margin as the
-    # confidence signal — both need `solve` to surface usage alongside the boxed answer.
-    print(f"time: {wall:.0f}s wall | {mean:.1f}s/problem mean | "
+    agree_str = f" | agreement {mean_agreement:.0%} mean" if mean_agreement is not None else ""
+    print(f"cost: {metrics['mean_tokens']:.0f} tok/problem mean, {metrics['total_tokens']} "
+          f"total (the per-token $ signal; flat-rate → read time){agree_str}")
+    print(f"time: {time.time() - sweep_t0:.0f}s wall | {metrics['mean_time']:.1f}s/problem mean | "
           f"min {min(times):.1f}s / max {max(times):.1f}s" if times else "time: n/a")
-    return acc
+    return metrics
 
 
 if __name__ == "__main__":
@@ -208,7 +236,7 @@ if __name__ == "__main__":
                     choices=["tir_fence", "cot", "self_verify", "tools"],
                     help="the rung: tir_fence (specialist) | cot | self_verify | tools")
     ap.add_argument("--provider", default=None,
-                    help="featherless | novita | moonshot | openrouter | deepinfra | selfhost")
+                    help="featherless | openrouter | novita | moonshot | deepinfra | selfhost")
     ap.add_argument("--model", default=None, help="model id (required for generalist strategies)")
     ap.add_argument("--max-tokens", type=int, default=None, help="per-round budget")
     ap.add_argument("--max-calls", type=int, default=None, help="max TIR rounds")
@@ -226,4 +254,5 @@ if __name__ == "__main__":
     print(f"audition: provider={args.provider or '(default)'} model={args.model or '(default)'} "
           f"strategy={args.strategy} data={args.data} n={len(problems)} k={args.k}")
     evaluate(problems, k=args.k, model=args.model, strategy=args.strategy,
-             provider=args.provider, max_tokens=args.max_tokens, max_calls=args.max_calls)
+             provider=args.provider, max_tokens=args.max_tokens, max_calls=args.max_calls,
+             timeout=args.timeout)

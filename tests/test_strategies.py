@@ -8,21 +8,23 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from solver_loop import solve, extract_boxed          # noqa: E402
+from solver_loop import solve, solve_one, extract_boxed          # noqa: E402
 from strategies import cot_stream, self_verify_stream, generalist_stream  # noqa: E402
 
 
 # --- a scripted, network-free chat client ----------------------------------
+# Scripted items are (content, reasoning) or (content, reasoning, reasoning_key) — the third
+# element lets a test put the trace under OpenRouter's `reasoning` instead of `reasoning_content`.
 class _Msg:
-    def __init__(self, content, reasoning=None):
+    def __init__(self, content, reasoning=None, reasoning_key="reasoning_content"):
         self.content = content
         if reasoning is not None:
-            self.reasoning_content = reasoning
+            setattr(self, reasoning_key, reasoning)
 
 
 class _Choice:
-    def __init__(self, content, reasoning=None, finish="stop"):
-        self.message = _Msg(content, reasoning)
+    def __init__(self, content, reasoning=None, finish="stop", reasoning_key="reasoning_content"):
+        self.message = _Msg(content, reasoning, reasoning_key)
         self.finish_reason = finish
 
 
@@ -33,8 +35,8 @@ class _Usage:
 
 
 class _Resp:
-    def __init__(self, content, reasoning=None):
-        self.choices = [_Choice(content, reasoning)]
+    def __init__(self, content, reasoning=None, reasoning_key="reasoning_content"):
+        self.choices = [_Choice(content, reasoning, reasoning_key=reasoning_key)]
         self.usage = _Usage()
 
 
@@ -43,8 +45,9 @@ class _Completions:
         self._scripted = list(scripted)
 
     def create(self, **kw):
-        content, reasoning = self._scripted.pop(0)
-        return _Resp(content, reasoning)
+        item = self._scripted.pop(0)
+        key = item[2] if len(item) > 2 else "reasoning_content"
+        return _Resp(item[0], item[1], key)
 
 
 class FakeClient:
@@ -102,3 +105,19 @@ def test_generalist_requires_a_model():
 def test_tools_rung_is_gated():
     evts = list(generalist_stream("q", strategy="tools", model="m", client=FakeClient([])))
     assert evts[-1]["type"] == "error" and "tools" in evts[-1]["message"].lower()
+
+
+def test_cot_handles_openrouter_reasoning_key():
+    # OpenRouter exposes the trace as `reasoning`; empty content forces the \boxed{} fallback.
+    client = FakeClient([("", "work… \\boxed{5}", "reasoning")])
+    evts = list(cot_stream("q", client=client, model="m", temperature=0.0,
+                           seed=None, max_tokens=100, stream=False))
+    assert _final(evts)["boxed"] == "5"
+
+
+def test_solve_one_reports_boxed_and_tokens():
+    client = FakeClient([("the answer is \\boxed{12}", None)])
+    r = solve_one("q", strategy="cot", model="m", client=client)
+    assert r["boxed"] == "12"
+    assert r["completion_tokens"] == 42
+    assert r["error"] is None

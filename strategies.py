@@ -46,6 +46,17 @@ def _extra(obj, key: str):
     return v
 
 
+def _reasoning(obj) -> str:
+    """The reasoning trace, under whichever name the provider uses: DeepSeek/Qwen/Kimi emit
+    `reasoning_content`; OpenRouter normalizes it to `reasoning`. (Only used as a \\boxed{}
+    fallback when visible content is empty.)"""
+    for key in ("reasoning_content", "reasoning"):
+        v = _extra(obj, key)
+        if v:
+            return v
+    return ""
+
+
 def _chat(client, model, messages, temperature, max_tokens, seed, stream):
     """One chat call. Yields ('delta', visible_text) per chunk, then ('done', info) with
     {text, reasoning, finish_reason, completion_tokens, prompt_tokens}. Only visible `content`
@@ -61,7 +72,7 @@ def _chat(client, model, messages, temperature, max_tokens, seed, stream):
         u = getattr(r, "usage", None)
         if text:
             yield "delta", text
-        yield "done", {"text": text, "reasoning": _extra(msg, "reasoning_content") or "",
+        yield "done", {"text": text, "reasoning": _reasoning(msg),
                        "finish_reason": r.choices[0].finish_reason,
                        "completion_tokens": getattr(u, "completion_tokens", None),
                        "prompt_tokens": getattr(u, "prompt_tokens", None)}
@@ -76,7 +87,7 @@ def _chat(client, model, messages, temperature, max_tokens, seed, stream):
             if piece:
                 text += piece
                 yield "delta", piece
-            rpiece = _extra(d, "reasoning_content") or ""
+            rpiece = _reasoning(d)
             if rpiece:
                 reasoning += rpiece
             if chunk.choices[0].finish_reason:
