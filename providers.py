@@ -13,7 +13,7 @@ deepinfra. See PLAN.md §6.1 for the n>1 / cost table this encodes.
 import os
 from dataclasses import dataclass
 
-from openai import OpenAI
+from openai import AsyncOpenAI, OpenAI
 
 
 @dataclass(frozen=True)
@@ -90,3 +90,11 @@ def make_client(provider: str | None = None) -> OpenAI:
     p = get_provider(provider)
     timeout = float(os.environ.get("PUDDING_HTTP_TIMEOUT", "180"))
     return OpenAI(base_url=p.base(), api_key=p.api_key(), timeout=timeout, max_retries=2)
+
+
+def make_async_client(provider: str | None = None) -> AsyncOpenAI:
+    """Async sibling of make_client — native async IO so the audition runs k samples / many
+    problems concurrently on one event loop (no thread per call). Same timeout policy."""
+    p = get_provider(provider)
+    timeout = float(os.environ.get("PUDDING_HTTP_TIMEOUT", "180"))
+    return AsyncOpenAI(base_url=p.base(), api_key=p.api_key(), timeout=timeout, max_retries=2)

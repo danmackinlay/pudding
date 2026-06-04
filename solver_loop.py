@@ -10,6 +10,7 @@ the remote `executor/modal_executor.py` Sandbox when the computation is heavy.
 
 UNTESTED. See PLAN.md §5 for the testing order (the solver is steps 1–5).
 """
+import asyncio
 import os
 import time
 from typing import Iterator
@@ -164,14 +165,11 @@ def solve_stream(problem: str, executor=None, max_calls: int = MAX_CALLS,
     elapsed_s, completion_tokens, truncated}`, or `error{message}` on failure. This is what
     the UI shim consumes; `solve()` below consumes it in non-stream mode for eval/fanout.
     """
-    # Non-fence rungs (cot / self_verify / tools) are chat-endpoint generalist strategies that
-    # emit the SAME envelope; dispatch to strategies.py (lazy import breaks the import cycle).
-    # The tir_fence path below is byte-identical to before.
+    # Generalist rungs (cot/self_verify) are async-native now (strategies.py + solve_one_async);
+    # this sync streaming loop is the TIR/UI path only.
     if strategy != "tir_fence":
-        from strategies import generalist_stream
-        yield from generalist_stream(problem, strategy=strategy, provider=provider,
-                                     client=client, model=model, temperature=temperature,
-                                     seed=seed, max_tokens=max_tokens, stream=stream)
+        yield ev("error", message=f"strategy {strategy!r} is async-only — use solve_one_async "
+                                   "(the audition: eval.py / audition.py)")
         return
 
     client = client or make_client(provider)
@@ -258,6 +256,52 @@ def solve_one(problem: str, *, executor=None, model: str | None = None,
         elif evt["type"] == "error":
             result["error"] = evt["message"]
     return result
+
+
+async def solve_one_async(problem: str, *, strategy: str = "tir_fence", model: str | None = None,
+                          provider: str | None = None, temperature: float = 0.0,
+                          seed: int | None = None, max_tokens: int = MAX_TOKENS,
+                          max_calls: int = MAX_CALLS, client=None) -> dict:
+    """Async single chain → {boxed, transcript, completion_tokens, truncated, elapsed_s,
+    ttft_s, decode_tok_s, error}. Generalist rungs run native-async (AsyncOpenAI); tir_fence
+    runs its blocking-kernel loop in a worker thread. The async audition (eval.py) drives this."""
+    base = {"boxed": None, "transcript": "", "completion_tokens": 0, "truncated": False,
+            "elapsed_s": 0.0, "ttft_s": None, "decode_tok_s": None, "error": None}
+    if strategy in ("cot", "self_verify", "tools"):
+        from strategies import generalist_stream
+        async for evt in generalist_stream(problem, strategy=strategy, provider=provider,
+                                            client=client, model=model, temperature=temperature,
+                                            seed=seed, max_tokens=max_tokens):
+            if evt["type"] == "final_answer":
+                base.update(boxed=evt.get("boxed"), transcript=evt.get("transcript", ""),
+                            completion_tokens=evt.get("completion_tokens") or 0,
+                            truncated=bool(evt.get("truncated")),
+                            elapsed_s=evt.get("elapsed_s") or 0.0,
+                            ttft_s=evt.get("ttft_s"), decode_tok_s=evt.get("decode_tok_s"))
+            elif evt["type"] == "error":
+                base["error"] = evt["message"]
+        return base
+    # tir_fence: a blocking IPython kernel → run the sync chain in a worker thread
+    return await asyncio.to_thread(_tir_solve_one_sync, problem, model, provider,
+                                   temperature, seed, max_tokens, max_calls)
+
+
+def _tir_solve_one_sync(problem, model, provider, temperature, seed, max_tokens, max_calls) -> dict:
+    """The TIR chain on a fresh local Kernel (sync); returns the solve_one dict + a coarse rate."""
+    kern = Kernel()
+    try:
+        r = solve_one(problem, executor=kern, model=model, provider=provider,
+                      strategy="tir_fence", temperature=temperature, seed=seed,
+                      max_tokens=max_tokens, max_calls=max_calls)
+    finally:
+        try:
+            kern.km.shutdown_kernel(now=True)
+        except Exception:
+            pass
+    el = r.get("elapsed_s") or 0.0
+    r.setdefault("ttft_s", None)
+    r["decode_tok_s"] = round((r.get("completion_tokens") or 0) / el, 1) if el > 0 else None
+    return r
 
 
 if __name__ == "__main__":

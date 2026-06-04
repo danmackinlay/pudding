@@ -175,8 +175,8 @@ contract, DeepSeek-/Goedel-Prover-V2 prompt template, version-match risks, Novit
 - `providers.py` — **NEW**: provider registry (model-server axis); `make_client(provider)`.
 - `strategies.py` — **NEW**: `cot` / `self_verify` generalist rungs; `tools` gated. Chat endpoint, shared envelope.
 - `solver_loop.py` — `tir_fence` engine + the strategy dispatch + the shared envelope + `solve_one` (token usage); local `Kernel`.
-- `audition.py` — **NEW**: matrix runner — sweep `contenders.jsonl` → ranked leaderboard (acc · agreement · tok · time) + JSONL log in `results/`.
-- `eval.py` — one audition cell: (model × strategy × provider) → accuracy + cost + agreement.
+- `audition.py` — **NEW**: async matrix runner — sweep `contenders.jsonl` → ranked leaderboard (acc · agreement · TTFT · tok/s · tok · wall) + JSONL log in `results/`.
+- `eval.py` — one audition cell, **async**: `asyncio.Semaphore`-bounded concurrency, `wait_for` cancellable timeouts; reports accuracy + cost + agreement + TTFT + decode tok/s. (No threads: model IO is AsyncOpenAI; only TIR's blocking kernel uses `to_thread`.)
 - `contenders.jsonl` — **NEW**: the editable audition lineup (provider/model/strategy per line).
 - `fanout.py` — Modal `.map` fan-out: maj@k (solver) / Pass@k (prover) — the confidence axis at scale.
 - `shim.py` + `streaming.py` — the **workbench surface** (Open WebUI bridge + FOIM delimiter buffer).
