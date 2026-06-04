@@ -48,6 +48,25 @@ def load_contenders(path: str) -> list[dict]:
     return out or DEFAULT_CONTENDERS
 
 
+def _completed_rows(fp: Path, n: int) -> dict:
+    """Resume support: (model, strategy) -> the latest successful saved row for this (data, k, n),
+    so a re-run skips experiments already in results/ (the file is per data+k; we match on n).
+    Lets a killed/caffeinated sweep be relaunched without repeating completed cells."""
+    out = {}
+    if fp.exists():
+        for line in fp.read_text().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if r.get("n") == n and not r.get("error") and r.get("acc") is not None:
+                out[(r.get("model"), r.get("strategy"))] = r   # later row wins (latest run)
+    return out
+
+
 async def run(args) -> None:
     contenders = load_contenders(args.contenders)
     problems = load_data(args.data, args.n)
@@ -62,9 +81,17 @@ async def run(args) -> None:
     fp = out_dir / f"audition-{args.data}-k{args.k}.jsonl"
     stamp = int(time.time())
 
+    done = {} if getattr(args, "fresh", False) else _completed_rows(fp, len(problems))
+    if done:
+        print(f"resume: skipping {len(done)} contender(s) already done at n={len(problems)}\n", flush=True)
     rows = []
     for c in contenders:
         label = c.get("label") or f'{c["model"]} [{c["strategy"]}]'
+        if (c["model"], c["strategy"]) in done:
+            prev = done[(c["model"], c["strategy"])]
+            print(f"↩ skip (already done): {label}  →  acc={prev['acc']:.0%}\n", flush=True)
+            rows.append({**c, "label": label, **prev})
+            continue
         mt = args.max_tokens or (16384 if c["strategy"] in GENERALIST else None)
         print(f"--- {label}  ({c['provider']} · {c['strategy']}) ---", flush=True)
         try:
@@ -113,6 +140,7 @@ def main():
     ap.add_argument("--timeout", type=float, default=None, help="per-problem wall-clock seconds")
     ap.add_argument("--concurrency", type=int, default=6, help="max in-flight problems/samples")
     ap.add_argument("--verbose", action="store_true", help="per-item lines (default: summaries only)")
+    ap.add_argument("--fresh", action="store_true", help="ignore results/ and re-run every contender")
     asyncio.run(run(ap.parse_args()))
 
 
