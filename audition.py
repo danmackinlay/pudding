@@ -22,17 +22,17 @@ from eval import evaluate, load_data
 
 GENERALIST = {"cot", "self_verify", "tools"}
 
-DEFAULT_CONTENDERS = [
-    {"provider": "featherless", "model": "Qwen/Qwen2.5-Math-72B-Instruct",
-     "strategy": "tir_fence", "label": "Qwen2.5-Math-72B · TIR"},
-    {"provider": "openrouter", "model": "moonshotai/kimi-k2.6",
-     "strategy": "cot", "label": "Kimi-K2.6 · CoT"},
-    {"provider": "openrouter", "model": "moonshotai/kimi-k2.6",
-     "strategy": "self_verify", "label": "Kimi-K2.6 · self-verify"},
+DEFAULT_CONTENDERS = [   # fast/cheap first (quick signal); slow flat-rate specialist last
     {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro",
      "strategy": "cot", "label": "DeepSeek-V4-Pro · CoT"},
+    {"provider": "openrouter", "model": "moonshotai/kimi-k2.6",
+     "strategy": "cot", "label": "Kimi-K2.6 · CoT"},
     {"provider": "openrouter", "model": "qwen/qwen3.7-max",
      "strategy": "cot", "label": "Qwen3.7-Max · CoT"},
+    {"provider": "openrouter", "model": "moonshotai/kimi-k2.6",
+     "strategy": "self_verify", "label": "Kimi-K2.6 · self-verify"},
+    {"provider": "featherless", "model": "Qwen/Qwen2.5-Math-72B-Instruct",
+     "strategy": "tir_fence", "concurrency": 3, "label": "Qwen2.5-Math-72B · TIR"},
 ]
 
 
@@ -54,27 +54,40 @@ async def run(args) -> None:
     print(f"audition: {len(contenders)} contenders × {len(problems)} problems "
           f"({args.data}) · maj@{args.k} · concurrency {args.concurrency}\n")
 
+    # Persist incrementally — each contender's row is appended as it finishes, so a kill (or a
+    # provider cutting us off at $0) keeps the completed rows. Prints flush live (also run the
+    # process unbuffered, e.g. PYTHONUNBUFFERED=1) so a backgrounded sweep is observable.
+    out_dir = Path("results")
+    out_dir.mkdir(exist_ok=True)
+    fp = out_dir / f"audition-{args.data}-k{args.k}.jsonl"
+    stamp = int(time.time())
+
     rows = []
     for c in contenders:
         label = c.get("label") or f'{c["model"]} [{c["strategy"]}]'
         mt = args.max_tokens or (16384 if c["strategy"] in GENERALIST else None)
-        print(f"--- {label}  ({c['provider']} · {c['strategy']}) ---")
+        print(f"--- {label}  ({c['provider']} · {c['strategy']}) ---", flush=True)
         try:
             m = await evaluate(problems, k=args.k, model=c["model"], strategy=c["strategy"],
                                provider=c["provider"], max_tokens=mt, timeout=args.timeout,
                                concurrency=c.get("concurrency", args.concurrency),  # per-row override
                                verbose=args.verbose)
         except Exception as e:  # noqa: BLE001 — one bad contender shouldn't kill the sweep
-            print(f"  contender failed: {type(e).__name__}: {e}")
+            print(f"  contender failed: {type(e).__name__}: {e}", flush=True)
             m = {"acc": 0.0, "mean_tokens": 0.0, "mean_time": 0.0, "wall": 0.0,
                  "mean_agreement": None, "mean_ttft": None, "mean_decode": None,
                  "error": f"{type(e).__name__}: {e}"}
-        rows.append({**c, "label": label, **m})
-        print()
+        row = {**c, "label": label, **m}
+        rows.append(row)
+        rec = {k: v for k, v in row.items() if k != "counts"}
+        rec["ts"], rec["data"], rec["k"], rec["n"] = stamp, args.data, args.k, len(problems)
+        with fp.open("a") as f:                       # write this row NOW, not at the end
+            f.write(json.dumps(rec) + "\n")
+        print(flush=True)
 
     # --- leaderboard ---
     rows.sort(key=lambda r: (r["acc"], -(r.get("mean_tokens") or 0)), reverse=True)
-    print("=" * 96)
+    print("=" * 96, flush=True)
     print(f"{'contender':<34} {'acc':>6} {'agree':>6} {'ttft':>6} {'tok/s':>6} {'tok/prob':>9} {'wall':>6}")
     print("-" * 96)
     for r in rows:
@@ -86,18 +99,7 @@ async def run(args) -> None:
               f"{(f'{ttft:.1f}s' if ttft is not None else '—'):>6} "
               f"{(f'{dec:.0f}' if dec is not None else '—'):>6} "
               f"{(r.get('mean_tokens') or 0):>9.0f} {(r.get('wall') or 0):>5.0f}s")
-
-    # --- persist (accumulates across runs) ---
-    out_dir = Path("results")
-    out_dir.mkdir(exist_ok=True)
-    fp = out_dir / f"audition-{args.data}-k{args.k}.jsonl"
-    stamp = int(time.time())
-    with fp.open("a") as f:
-        for r in rows:
-            rec = {k: v for k, v in r.items() if k != "counts"}
-            rec["ts"], rec["data"], rec["k"], rec["n"] = stamp, args.data, args.k, len(problems)
-            f.write(json.dumps(rec) + "\n")
-    print(f"\nwrote {fp}")
+    print(f"\nappended {len(rows)} rows to {fp}", flush=True)
 
 
 def main():

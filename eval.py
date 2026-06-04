@@ -257,7 +257,7 @@ async def evaluate(problems: list[dict], k: int = 1, model: str | None = None, *
     print(f"cost: {metrics['mean_tokens']:.0f} tok/problem mean, {metrics['total_tokens']} total"
           f"{agree_str}")
     print(f"speed: {wall:.0f}s wall (concurrency {concurrency}) | {metrics['mean_time']:.1f}s/problem "
-          f"mean | TTFT {ttft_str} | decode {dec_str}")
+          f"mean | TTFT {ttft_str} | decode {dec_str}", flush=True)
     return metrics
 
 

@@ -2,14 +2,15 @@
 # '#' lines are ignored.  strategy ∈ tir_fence (specialist, Qwen ```python fences) | cot | self_verify | tools(gated)
 # providers: featherless (specialists) | openrouter (generalists) | ollama (local, later) | novita | selfhost
 # optional per-row "concurrency": N caps in-flight calls for that row (e.g. Featherless's low limit)
-{"provider": "featherless", "model": "Qwen/Qwen2.5-Math-72B-Instruct", "strategy": "tir_fence", "concurrency": 3, "label": "Qwen2.5-Math-72B · TIR"}
-{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "cot", "label": "Kimi-K2.6 · CoT"}
-{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "self_verify", "label": "Kimi-K2.6 · self-verify"}
+# order = fast/cheap first (quick signal), slow flat-rate specialist last.
 {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro", "strategy": "cot", "label": "DeepSeek-V4-Pro · CoT"}
+{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "cot", "label": "Kimi-K2.6 · CoT"}
 {"provider": "openrouter", "model": "qwen/qwen3.7-max", "strategy": "cot", "label": "Qwen3.7-Max · CoT"}
+{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "self_verify", "label": "Kimi-K2.6 · self-verify"}
+{"provider": "featherless", "model": "Qwen/Qwen2.5-Math-72B-Instruct", "strategy": "tir_fence", "concurrency": 3, "label": "Qwen2.5-Math-72B · TIR"}
 # extend to compare rung 1 vs rung 2 per model, e.g.:
 # {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro", "strategy": "self_verify", "label": "DeepSeek-V4-Pro · self-verify"}
 # {"provider": "openrouter", "model": "qwen/qwen3.7-max", "strategy": "self_verify", "label": "Qwen3.7-Max · self-verify"}
-# local Nemotron via ollama (after you set it up). NB OpenMath-Nemotron emits <tool_call> tags,
-# NOT the Qwen fences tir_fence parses — run it as cot, or parametrize the tags first:
+# local Nemotron via ollama (after setup; OpenMath-Nemotron uses <tool_call> tags, not the Qwen
+# fences tir_fence parses — run it as cot, or parametrize the tags first):
 # {"provider": "ollama", "model": "nemotron", "strategy": "cot", "label": "Nemotron (local) · CoT"}
