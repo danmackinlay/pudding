@@ -68,8 +68,14 @@ so the workbench has no sandbox/security surface), and multi-turn chat (stateles
    slug → `(provider, model, strategy)`.
 4. **The trust ladder is the picker.** Per model, offer rungs: `…-cot` (stream), `…-verify`
    (stream + self-check verdict), `…-deep` (maj@k, agreement panel). Swapping = climbing.
-5. **Surface trust, don't bury it.** `self_verify` renders **✓ confirmed {x}** vs **⚠ corrected
-   {a}→{b}**; `…-deep` renders **{answer} · agreement m/k**. This is the headline feature.
+5. **Surface trust, don't bury it — and lead with maj@k, not self-verify.**
+   ⚠️ **EMPIRICAL UPDATE (2026-06-05 audition):** the `self_verify` rung *degraded* accuracy on
+   both hard sets (Kimi CoT→verify: 5/8→3/8 AIME, 93%→73% MATH-L5) — the single-pass critic
+   second-guesses correct answers (the classic "self-correction without a reliable verifier
+   hurts"). Meanwhile **maj@k agreement was 100% wherever a model answered.** So the *trustworthy*
+   confidence surface is **maj@k agreement** (`…-deep` → **{answer} · agreement m/k**); treat
+   `self_verify`'s **✓ confirmed / ⚠ corrected** as **experimental** until its prompt is fixed
+   (see §6). Build `…-deep` first; don't ship `self_verify` as *the* "check this" signal yet.
 6. **Show the working.** Generalists put the real derivation in `reasoning_content`, separate
    from `content`; a mathematician wants to read it. Surface it (collapsible/dimmed) — see §3 V1.2
    and the open question.
@@ -141,6 +147,11 @@ so the workbench has no sandbox/security surface), and multi-turn chat (stateles
 
 ## 6. Open questions (resolve while building)
 
+- **Why does `self_verify` degrade accuracy?** (5/8→3/8 AIME, 93%→73% MATH-L5, both Kimi.) Almost
+  certainly `VERIFY_SYS` over-corrects — the critic changes right answers. Try: (a) "only change
+  the answer if you find a *definite* error, else restate it verbatim"; (b) verify-then-vote
+  (run verify across k samples, keep the majority); (c) drop the rung. Until fixed, `…-deep`
+  (maj@k agreement) is the confidence surface, not `self_verify`.
 - **`reasoning_content` display:** always-collapsible? only when `content` is terse/empty? Models
   differ (some put the whole solution in reasoning, a terse answer in content; others the reverse).
   Lean: show it collapsibly, expanded-by-default if `content` is short. Confirm Open WebUI's
@@ -149,7 +160,11 @@ so the workbench has no sandbox/security surface), and multi-turn chat (stateles
 - **Prices source:** static `prices.json` (simple, drifts) vs pull from OpenRouter `/models` live
   (accurate, a network call at startup). Start static.
 - **Workbench lineup:** full `contenders.jsonl` (incl. the specialist) or a curated generalist
-  subset via `WORKBENCH_LINEUP`. Let the overnight audition results inform the default.
+  subset via `WORKBENCH_LINEUP`. **Audition findings (2026-06-05):** Qwen3.7-Max = accuracy leader
+  (AIME 8/8, MATH-L5 14/15; priciest, $0.17/correct); DeepSeek-V4-Pro = value champ
+  ($0.003–0.02/correct, AIME 6/8 / MATH-L5 13/15); Kimi-K2.6 = slow + verbose, weaker on AIME
+  (5/8) though strong on MATH-L5 (14/15); Qwen2.5-Math specialist = 0% on both (drop it). Suggested
+  default picker: DeepSeek + Qwen CoT, a `…-deep` for each; `self_verify` off until reworked.
 - **Token budget per rung:** interactive `max_tokens` (16k? higher for hard problems?) trades
   latency for completeness; expose as an effort knob?
 
