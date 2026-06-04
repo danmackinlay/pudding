@@ -80,6 +80,13 @@ def get_provider(provider: str | None) -> Provider:
 
 
 def make_client(provider: str | None = None) -> OpenAI:
-    """An OpenAI-compatible client for `provider` (None → the back-compat default above)."""
+    """An OpenAI-compatible client for `provider` (None → the back-compat default above).
+
+    A finite per-request `timeout` (PUDDING_HTTP_TIMEOUT, default 180s) is the real cap on a
+    hung/slow call: eval's per-problem ThreadPoolExecutor timeout can't hard-stop one, because
+    exiting its `with` block waits on the orphaned request (a thinking-model call once ran 146s
+    past a 120s cap). Bound it at the HTTP layer instead.
+    """
     p = get_provider(provider)
-    return OpenAI(base_url=p.base(), api_key=p.api_key())
+    timeout = float(os.environ.get("PUDDING_HTTP_TIMEOUT", "180"))
+    return OpenAI(base_url=p.base(), api_key=p.api_key(), timeout=timeout, max_retries=2)
