@@ -23,19 +23,21 @@ The prover is the solver with three changes: the executor becomes a Lean verifie
 
 ## Status
 
-**The solver spine is verified end-to-end** against a live metered endpoint (Featherless)
-and a Modal-hosted executor: the TIR loop, the local IPython `Kernel` (state persists,
-errors captured), the remote-executor swap, and `eval.py` over the §9.4 staircase all run.
-A **streaming chat UI** is wired (Stage 1.5): `solve_stream` → an OpenAI-compatible `shim.py`
-(with a streaming-LaTeX/FOIM delimiter buffer so `\(…\)`/`\boxed{}` never flash) → **Open
-WebUI** (`OPEN_WEBUI.md`). The **prover is stage 2** and untested;
-its research is frozen in `PROVER_RESEARCH_ADDENDUM.md` (which corrects two guesses in
-`PLAN.md` — there's a prebuilt Kimina image, so no multi-hour `lean_image` build). Read
-`PLAN.md` before executing.
+**Pivoted to a workbench framing** (see `PLAN.md`): the product is a *rented generalist +
+verification*, not the specialist TIR solver. The organizing idea is a **trust ladder** —
+maj@k → self-verify → tool-check → Lean — and the repo is driven by an **audition**
+(`eval.py --provider --strategy`) that picks the engine by results.
 
-> Known model quirk (not a pipeline bug): Qwen2.5-Math-7B *and* 72B answer `7^999 mod 1000`
-> as `43` even though the kernel correctly returns `143` — and maj@8 is unanimously wrong,
-> so it's a systematic "won't trust the tool" error. The other staircase problems pass.
+- **Built + tested** (Phase A, network-free): the provider registry (`providers.py`), the
+  generalist `cot`/`self_verify` rungs (`strategies.py`), and the strategy dispatch in
+  `solver_loop.py`, all on the shared streaming envelope — 24 tests pass.
+- **Verified earlier** and reused as one contender: the `tir_fence` TIR loop end-to-end on
+  Featherless, the local `Kernel`, the remote-executor swap, and the Open WebUI shim (`shim.py`).
+- **Gated:** the Lean prover (Phase C) — research frozen in `PROVER_RESEARCH_ADDENDUM.md`.
+
+> Why the pivot: Qwen2.5-Math-7B *and* 72B answer `7^999 mod 1000` as `43` (maj@8 unanimously
+> wrong) despite the kernel returning `143` — a systematic "won't trust the tool" failure. The
+> 2026 leaderboards are topped by rentable generalists instead. `PLAN.md` has the full reasoning.
 
 ## Setup
 

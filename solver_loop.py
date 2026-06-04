@@ -16,6 +16,7 @@ from typing import Iterator
 
 from openai import OpenAI
 
+from providers import make_client  # provider registry (model-server axis); see providers.py
 from streaming import ev  # shared event envelope (also used by the UI shim + stage-2 prover)
 
 MODEL = "Qwen/Qwen2.5-Math-7B-Instruct"
@@ -67,17 +68,6 @@ class Kernel:
             elif t == "status" and c["execution_state"] == "idle":
                 break
         return "".join(chunks)[:1000]  # cap so a runaway print can't flood context
-
-
-def make_client() -> OpenAI:
-    # Chosen path is a metered endpoint (Featherless), executor stays local. Point
-    # SOLVER_BASE_URL at a self-hosted Modal serve.py URL (or any vLLM endpoint) to swap.
-    return OpenAI(
-        base_url=os.environ.get("SOLVER_BASE_URL", "https://api.featherless.ai/v1"),
-        api_key=os.environ.get("FEATHERLESS_API_KEY")
-        or os.environ.get("SOLVER_API_KEY")
-        or os.environ.get("VLLM_KEY", "EMPTY"),
-    )
 
 
 def last_code(text: str):
@@ -165,7 +155,8 @@ def _generate(client, model, prompt, temperature, max_tokens, seed, stream):
 def solve_stream(problem: str, executor=None, max_calls: int = MAX_CALLS,
                  client: OpenAI | None = None, temperature: float = 0.0,
                  seed: int | None = None, model: str | None = None,
-                 max_tokens: int = MAX_TOKENS, stream: bool = True) -> Iterator[dict]:
+                 max_tokens: int = MAX_TOKENS, stream: bool = True,
+                 strategy: str = "tir_fence", provider: str | None = None) -> Iterator[dict]:
     """The TIR loop as a stream of events (the shared envelope; see streaming.py).
 
     Yields: `reasoning_delta{text}` per token chunk, `code{lang,code}` before each
@@ -173,7 +164,17 @@ def solve_stream(problem: str, executor=None, max_calls: int = MAX_CALLS,
     elapsed_s, completion_tokens, truncated}`, or `error{message}` on failure. This is what
     the UI shim consumes; `solve()` below consumes it in non-stream mode for eval/fanout.
     """
-    client = client or make_client()
+    # Non-fence rungs (cot / self_verify / tools) are chat-endpoint generalist strategies that
+    # emit the SAME envelope; dispatch to strategies.py (lazy import breaks the import cycle).
+    # The tir_fence path below is byte-identical to before.
+    if strategy != "tir_fence":
+        from strategies import generalist_stream
+        yield from generalist_stream(problem, strategy=strategy, provider=provider,
+                                     client=client, model=model, temperature=temperature,
+                                     seed=seed, max_tokens=max_tokens, stream=stream)
+        return
+
+    client = client or make_client(provider)
     model = model or MODEL
     executor = executor or Kernel()
     run = getattr(executor.run, "remote", executor.run)  # Modal class vs local object
@@ -213,7 +214,8 @@ def solve_stream(problem: str, executor=None, max_calls: int = MAX_CALLS,
 
 def solve(problem: str, executor=None, max_calls: int = MAX_CALLS, client: OpenAI | None = None,
           temperature: float = 0.0, seed: int | None = None, model: str | None = None,
-          max_tokens: int = MAX_TOKENS) -> str:
+          max_tokens: int = MAX_TOKENS, strategy: str = "tir_fence",
+          provider: str | None = None) -> str:
     """Blocking TIR solve → full transcript (answer = last \\boxed{...}, via extract_boxed).
 
     A thin wrapper over `solve_stream` in **non-stream** mode, so `eval.py`/`fanout.py` get
@@ -225,7 +227,8 @@ def solve(problem: str, executor=None, max_calls: int = MAX_CALLS, client: OpenA
     transcript = ""
     for evt in solve_stream(problem, executor=executor, max_calls=max_calls, client=client,
                             temperature=temperature, seed=seed, model=model,
-                            max_tokens=max_tokens, stream=False):
+                            max_tokens=max_tokens, stream=False, strategy=strategy,
+                            provider=provider):
         if evt["type"] == "final_answer":
             transcript = evt["transcript"]
         elif evt["type"] == "error":
