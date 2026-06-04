@@ -114,21 +114,29 @@ def _as_number(s: str):
     return None
 
 
+def _norm_latex(s: str) -> str:
+    # display-style fracs are the same value; \dfrac/\tfrac vs \frac defeats both string-match
+    # and math_verify (seen live: \dfrac{3}{56} graded != \frac{3}{56}).
+    return s.replace("\\dfrac", "\\frac").replace("\\tfrac", "\\frac").strip()
+
+
 def grade(pred: str | None, gold: str) -> bool:
-    """True if pred matches gold. **Exact string match first** so identical answers — including
-    symbolic ones like 'p - q' that math_verify can't compare — are never failed by the grader
-    (a real bug the calibration caught). Then integer/decimal equality (AIME/GSM8K/AMC); then
-    LaTeX symbolic equivalence via math_verify (MATH-500: \\frac{1}{2} == 0.5 == 0.50)."""
+    """True if pred matches gold. Exact match first (identical strings, incl. symbolic like
+    'p - q'); then a \\dfrac/\\tfrac-normalized exact match; then integer/decimal equality
+    (AIME/GSM8K/AMC); then LaTeX symbolic equivalence via math_verify (MATH-500)."""
     if pred is None:
         return False
     if pred.strip() == gold.strip():
         return True
-    pn, gn = _as_number(pred), _as_number(gold)
+    p, g = _norm_latex(pred), _norm_latex(gold)
+    if p == g:
+        return True
+    pn, gn = _as_number(p), _as_number(g)
     if pn is not None and gn is not None:
         return pn == gn
     if _HAS_MATH_VERIFY:
         try:
-            return bool(_mv_verify(_mv_parse(gold), _mv_parse(pred)))   # verify(gold, pred)
+            return bool(_mv_verify(_mv_parse(g), _mv_parse(p)))   # verify(gold, pred)
         except Exception:
             pass
     return False

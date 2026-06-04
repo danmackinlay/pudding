@@ -20,6 +20,12 @@ def test_exact_match_never_failed_by_grader():
     assert grade("\\frac{3}{56}", "\\frac{3}{56}")
 
 
+def test_display_frac_normalized():
+    # seen live on MATH-L5: \dfrac == \frac, but defeated string-match + math_verify
+    assert grade("\\dfrac{3}{56}", "\\frac{3}{56}")
+    assert grade("\\tfrac{1}{2}", "\\frac{1}{2}")
+
+
 def test_none_is_wrong():
     assert not grade(None, "5")
 

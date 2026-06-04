@@ -1,0 +1,4 @@
+# Kimi-only lineup for the long-cap overnight re-run (AIME timeouts were token-hungry, not capability).
+# Run with: --concurrency 4 --max-tokens 32000 --timeout 1800 + PUDDING_HTTP_TIMEOUT=1200
+{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "cot", "label": "Kimi-K2.6 · CoT"}
+{"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "self_verify", "label": "Kimi-K2.6 · self-verify"}
