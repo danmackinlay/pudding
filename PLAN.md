@@ -62,8 +62,11 @@ contender* you could plug in behind `solve()`. We do **not** write a universal m
 
 ## 3. Phase A — the audition (BUILD FIRST; the only pre-numbers build)  ← we are here
 
-**Goal:** a table of (model × strategy × provider) → accuracy / cost / agreement on real
-benchmarks, so the numbers pick the engine and kill the dead rungs.
+**Goal:** a table of (model × strategy × provider) → accuracy / cost / agreement / latency on
+real benchmarks, to **compare the affordances of each side by side**. This is a *standing*
+comparison tool, not a one-shot selection — there is no "winning model" yet; everything stays
+swappable (`contenders.jsonl`, `--provider/--model/--strategy`) while we get a feel for each.
+(Dead *rungs* may still be retired by data; *models* stay in rotation.)
 
 **Built** (all green, `tests/test_strategies.py` + existing suite, 26 passed):
 - `providers.py` — provider registry (base_url, key envs, `n>1` support). Confirmed: featherless,
@@ -98,14 +101,16 @@ lineup editable in `contenders.jsonl`, results logged under `results/`.
    contamination-checked, publishable figures; keep `eval.py`/`audition.py` for the dev loop.
    (Don't re-implement graders — 2026 best practice is to plug into one.)
 
-## 4. Phase B — the workbench (build around the winner)
+## 4. Phase B — the swappable workbench
 
-Wire the winning (model × rung) behind the chat surface that **already exists** (`shim.py` +
-`streaming.py` + Open WebUI, `OPEN_WEBUI.md`). The shim consumes the same envelope, so `cot` /
-`self_verify` render today with **no shim change**. The real new work is **surfacing trust**:
-show the confidence signal (agreement / self-verify verdict), not just the answer — the "check
-this" UX. This is the thing you actually use. (`shim.py` is currently hard-wired to a local
-`Kernel`; generalize it to pass `strategy`/`provider` so the workbench serves the winner.)
+Wire the chat surface that **already exists** (`shim.py` + `streaming.py` + Open WebUI,
+`OPEN_WEBUI.md`) to a **runtime-selectable (model × rung)** — provider/model/strategy chosen by
+config/env (or a model picker in the UI), *not* hardwired to one "winner", since we're keeping
+swappability while feeling out each model. The shim consumes the same envelope, so `cot` /
+`self_verify` render today with no shim change. The real new work is **surfacing trust**: show
+the confidence signal (agreement / self-verify verdict), not just the answer — the "check this"
+UX. (`shim.py` is currently hard-wired to a local `Kernel` + the TIR path; generalize it to
+dispatch `strategy`/`provider`/`model` so you can swap and compare live.)
 
 ## 5. Phase C — the prover spike (GATED parking lot)
 

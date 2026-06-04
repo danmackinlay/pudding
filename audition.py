@@ -62,7 +62,8 @@ async def run(args) -> None:
         try:
             m = await evaluate(problems, k=args.k, model=c["model"], strategy=c["strategy"],
                                provider=c["provider"], max_tokens=mt, timeout=args.timeout,
-                               concurrency=args.concurrency, verbose=args.verbose)
+                               concurrency=c.get("concurrency", args.concurrency),  # per-row override
+                               verbose=args.verbose)
         except Exception as e:  # noqa: BLE001 — one bad contender shouldn't kill the sweep
             print(f"  contender failed: {type(e).__name__}: {e}")
             m = {"acc": 0.0, "mean_tokens": 0.0, "mean_time": 0.0, "wall": 0.0,

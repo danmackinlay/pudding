@@ -1,7 +1,8 @@
 # audition lineup — one JSON object per line: {provider, model, strategy, label?}
 # '#' lines are ignored.  strategy ∈ tir_fence (specialist, Qwen ```python fences) | cot | self_verify | tools(gated)
 # providers: featherless (specialists) | openrouter (generalists) | ollama (local, later) | novita | selfhost
-{"provider": "featherless", "model": "Qwen/Qwen2.5-Math-72B-Instruct", "strategy": "tir_fence", "label": "Qwen2.5-Math-72B · TIR"}
+# optional per-row "concurrency": N caps in-flight calls for that row (e.g. Featherless's low limit)
+{"provider": "featherless", "model": "Qwen/Qwen2.5-Math-72B-Instruct", "strategy": "tir_fence", "concurrency": 3, "label": "Qwen2.5-Math-72B · TIR"}
 {"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "cot", "label": "Kimi-K2.6 · CoT"}
 {"provider": "openrouter", "model": "moonshotai/kimi-k2.6", "strategy": "self_verify", "label": "Kimi-K2.6 · self-verify"}
 {"provider": "openrouter", "model": "deepseek/deepseek-v4-pro", "strategy": "cot", "label": "DeepSeek-V4-Pro · CoT"}

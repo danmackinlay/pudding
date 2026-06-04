@@ -11,6 +11,8 @@ dependencies = [
     "sympy",           # the libs model-written code reaches for
     "numpy",
     "scipy",
+    "math-verify",     # symbolic equivalence grading for MATH-500 (LaTeX answers)
+    "datasets",        # HF benchmark loaders (GSM8K, MATH-500, AMC, AIME)
     "fastapi",         # the OpenAI-compatible chat shim (shim.py → Open WebUI)
     "uvicorn",
     # "kimina-client",   # client for the Kimina Lean Server = the prover's verifier

@@ -23,6 +23,12 @@ from collections import Counter
 
 from solver_loop import solve_one_async
 
+try:                                              # optional — only MATH-500 needs it
+    from math_verify import parse as _mv_parse, verify as _mv_verify
+    _HAS_MATH_VERIFY = True
+except Exception:
+    _HAS_MATH_VERIFY = False
+
 GENERALIST = {"cot", "self_verify", "tools"}      # need an explicit --model; want a fat budget
 
 
@@ -59,9 +65,24 @@ def _load_hf(name: str, n: int, problem_key: str = "problem", answer_key: str = 
             for r in ds.select(range(min(n, len(ds))))]
 
 
-def load_math500(n: int = 20) -> list[dict]:
-    """First n MATH-500 items. NB answers are LaTeX → needs the symbolic grader."""
-    return _load_hf("HuggingFaceH4/MATH-500", n, split="test")
+def _level(r) -> int:
+    lv = r.get("level")
+    if isinstance(lv, (int, float)):
+        return int(lv)
+    try:
+        return int(str(lv).strip().split()[-1])      # "Level 5" → 5
+    except Exception:
+        return 0
+
+
+def load_math500(n: int = 20, min_level: int | None = None) -> list[dict]:
+    """First n MATH-500 items (optionally filtered to level >= min_level — 5 is the hardest
+    tier). Answers are LaTeX → graded by math_verify (symbolic equivalence)."""
+    from datasets import load_dataset
+    rows = list(load_dataset("HuggingFaceH4/MATH-500", split="test"))
+    if min_level is not None:
+        rows = [r for r in rows if _level(r) >= min_level]
+    return [{"problem": r["problem"], "answer": r["answer"]} for r in rows[:n]]
 
 
 def load_amc23(n: int = 40) -> list[dict]:
@@ -77,6 +98,7 @@ def load_data(name: str, n: int) -> list[dict]:
         "samples": lambda: load_samples(),
         "gsm8k": lambda: load_gsm8k(n),
         "math500": lambda: load_math500(n),
+        "math500_hard": lambda: load_math500(n, min_level=5),   # hardest tier (level 5)
         "amc23": lambda: load_amc23(n),
         "aime24": lambda: load_aime24(n),
     }.get(name, lambda: load_samples(name))()
@@ -93,15 +115,23 @@ def _as_number(s: str):
 
 
 def grade(pred: str | None, gold: str) -> bool:
-    """Integer/decimal-aware equality. MATH is LaTeX — swap in:
-        from math_verify import parse, verify; return verify(parse(gold), parse(pred))
-    """
+    """True if pred matches gold. **Exact string match first** so identical answers — including
+    symbolic ones like 'p - q' that math_verify can't compare — are never failed by the grader
+    (a real bug the calibration caught). Then integer/decimal equality (AIME/GSM8K/AMC); then
+    LaTeX symbolic equivalence via math_verify (MATH-500: \\frac{1}{2} == 0.5 == 0.50)."""
     if pred is None:
         return False
+    if pred.strip() == gold.strip():
+        return True
     pn, gn = _as_number(pred), _as_number(gold)
     if pn is not None and gn is not None:
         return pn == gn
-    return pred.strip() == gold.strip()
+    if _HAS_MATH_VERIFY:
+        try:
+            return bool(_mv_verify(_mv_parse(gold), _mv_parse(pred)))   # verify(gold, pred)
+        except Exception:
+            pass
+    return False
 
 
 def _mean(xs: list) -> float:
