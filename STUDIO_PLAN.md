@@ -61,9 +61,10 @@ work is **a job layer, a library API, a notebook app, and a generative (conjectu
   (async `cot`/`self_verify` + the thinking channel), `eval.solve_graded_async` (**maj@k** —
   k seeded chains, `asyncio.gather`, the vote), `providers` (the model×provider registry),
   `contenders.jsonl` (the lineup = the lanes of a fan-out).
-- **Fan-out pattern:** `fanout.py` — one full chain as a Modal function `.map`-ped over seeds,
-  each its own container/kernel, scale-to-zero. The solver path works (UNTESTED at scale); the
-  prover path is a commented sketch. **This is the cloud-burst substrate.**
+- **Fan-out primitives:** for rented generalists, **`asyncio.gather` + a `Semaphore`** (as in
+  `eval`/`audition`) is the whole fan-out — the provider rate limit is the ceiling. `fanout.py`
+  (Modal `.map` over seeds, container/kernel per chain, scale-to-zero) is the **prover's** future
+  substrate (sandbox-per-call), not the generalist path — repurpose it for Pass@k.
 - **The envelope (the multiplexing seam):** `streaming.ev` — `reasoning_delta` · `thinking_delta`
   · `code` · `tool_result` · `final_answer{boxed, candidate_boxed, agreement, …}` · `error`, plus
   reserved prover events `proof`/`goal_state`/`verdict`. Each attempt **is** an envelope stream;
@@ -72,7 +73,10 @@ work is **a job layer, a library API, a notebook app, and a generative (conjectu
   agreement panel, thinking channel, cost footer). One attempt-card renders with *this*. The shim's
   `_aiter_sync`, `stream_events`, picker, and `prices.json` are all reusable.
 - **The async single call already exists** in embryo: `eval.solve_graded_async(problem, k, model,
-  …) -> {pred, agreement, tokens, …}`. The job layer wraps it; don't re-implement voting.
+  …) -> {pred, agreement, tokens, …}` — reuse its voting. **But it votes and *discards* the
+  per-sample detail**; the answer-cluster widget needs the whole distribution, so the job layer's
+  fan-out must **retain every attempt** (`solve_one_async` ×k, keeping each `{boxed, transcript,
+  tokens, ttft, error}`) and cluster them — `solve_graded_async` is the reducer, not the collector.
 
 ## 2. Architecture decisions (locked)
 
@@ -83,8 +87,13 @@ work is **a job layer, a library API, a notebook app, and a generative (conjectu
    `on_event=` sink, and bind UI controls to plain `Job` methods (`cancel`/`widen`) — none required
    to run.
 2. **One job layer, three consumers** (async call · fleet widget · library). `Job` is the only
-   async/fan-out abstraction. It hides backend (in-process for cheap/sync, Modal `.map` for cloud
-   bursts) behind one API.
+   async/fan-out abstraction, behind a `backend=` knob (default `"local"`).
+   **Parallelism rule — match the primitive to the workload:** for *rented generalists* the per-call
+   unit is just an HTTP call, so **local `asyncio.gather` + a `Semaphore` at the provider's rate
+   limit IS the complete fan-out — Modal can't raise that ceiling** (more containers hit the same
+   account limit). Modal (`backend="modal"`) re-enters only when a per-call owns a heavy/stateful
+   thing: the prover's Lean sandbox (Pass@k), the `tools` kernel, or a self-hosted GPU with `n>1`
+   shared prefill. So `fanout.py` is the prover's future, **not** the generalist path.
 3. **Markdown + LaTeX is the interchange; results are frozen, citable artifacts.** Cells store
    markdown; problems enter as markdown; a result is a **canonical** markdown artifact (+ a
    structured sidecar), content-addressed and `pin`-able — so a stochastic run freezes with its
@@ -105,8 +114,9 @@ work is **a job layer, a library API, a notebook app, and a generative (conjectu
    within/cross-model agreement (trust in the *spread*). Prover: first/ranked **verified** (trust in
    the *cell*).
 8. **Backend-agnostic, persistent jobs.** A `Job` survives the client process (a store), so an
-   agent/cron/notebook-reload can submit, detach, and collect. Local jobs run in-process; bursts on
-   Modal; identical API.
+   agent/cron/notebook-reload can submit, detach, and collect. Default backend is **local asyncio**
+   (the right and complete primitive for rented generalists — see #2); Modal is opt-in for the
+   sandbox/GPU-per-call regimes. Identical API either way.
 9. **Library owns the view-model + a static render; the frontend owns the interactive shell.** The
    answer-cluster / flock / proof-gallery *data* (clusters, agreement, per-attempt rows, cost) and a
    static markdown/HTML rendering of it live in the library; live widgets + controls live in
@@ -156,6 +166,13 @@ nightly conjecture-mining cron, or an autonomous agent that fans out maths and c
 opts into watching/steering; the library is the backend either a human or a machine calls. A
 headless caller just `await`s; an interactive one consumes `job.stream()` and binds buttons to
 `job.cancel()`/`job.widen()` — the difference is entirely in the consumer, never the core.
+
+**Prompt sources & the explore-a-space grid.** A problem can come from a paste, a benchmark slice
+(`eval.load_data`), or a **parametric template** (`"Is {n}²+1 prime?"` over `n=2..20`) — the killer
+case for exploration and conjecture-mining. Running `solve` over a *set* of `prompts × lineup`
+yields a **grid** (cell = prompt × contender; drill-in = its k clustered samples) — the same
+answer-cluster instrument, batched. That batch-explorer view is one more widget over the same job
+layer, not a separate engine.
 
 **The generative loop (AI doing maths, disciplined).** A `conjecture` cell takes context — a
 selection, the notebook's accumulated corpus, or raw data/examples — and proposes hypotheses
@@ -219,7 +236,8 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
 ## 5. Build order (phases)
 
 - **P1 — the library + job layer (solver-only; buildable NOW).** `pudding.solve` (async) + `Job` +
-  store + the markdown artifact, over the existing `solve_graded_async`/`fanout`. **DoD:** `import
+  store + the markdown artifact, over local-`asyncio` fan-out (the `solve_one_async` ×k collector +
+  `solve_graded_async`'s reducer); `backend="modal"` deferred to the prover. **DoD:** `import
   pudding; await pudding.solve(...)` from any script returns a persistent job and a markdown result;
   detach-and-reconnect works. *This is the "function call my code invokes asynchronously," delivered.*
 - **P2 — the notebook app (the studio).** marimo reference app: markdown cells (paste in / copy
@@ -245,8 +263,10 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
   *and* feed back as context, without inventing a format people resent.
 - **`conjecture` context:** selection vs whole-notebook corpus vs uploaded data — and how to keep the
   prompt honest (it must propose, not assert; the oracle, not the prose, decides).
-- **Dedup/merge** of equivalent answers/conjectures (symbolic equivalence — reuse `eval.grade`'s
-  `math_verify` path) so clusters and flocks don't double-count `\dfrac` vs `\frac`.
+- **Dedup/cluster** of equivalent answers/conjectures: cluster by `eval._norm_latex` + int/decimal
+  (cheap, live) rather than pairwise `math_verify` (correct but too expensive to run across a live
+  grid) — accept that symbolic-equal-but-different-form answers may split into separate clusters;
+  `None`/`""` → the `∅` (no-answer) cluster.
 - **Cost-budget semantics:** hard cap (kill at $X) vs warn-and-continue; auto-stop-on-first-verified
   default; pre-flight estimate from `prices.json`.
 - **Does the Phase-B chat shim survive** as the "quick single question" lightweight client, or is it

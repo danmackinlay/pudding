@@ -115,13 +115,14 @@ dispatch `strategy`/`provider`/`model` so you can swap and compare live.)
 **Full handoff spec → `WORKBENCH_PLAN.md`** — decisions (async-first shim, picker = the lineup,
 trust surface = self-verify verdict + maj@k agreement), build order, contracts, testing checklist.
 
-**A third affordance — the Explorer (`EXPLORER_PLAN.md`)** — for *exploring many hypotheses at
-once* (prompts × lineup × k → a **marimo** grid you drill into), distinct from this single-thread
-chat. **Parallelism rule:** match the fan-out primitive to the workload — **local `asyncio` for
-rented generalists** (the provider's rate limit is the ceiling; Modal can't bypass it), and
-**Modal `.map` only when a per-call owns a sandbox/GPU** (the prover's Lean verifier, the `tools`
-kernel, a self-hosted model). `fanout.py` is the stale Modal template → repurpose for prover
-Pass@k, *not* the generalist path.
+**Phase C — the maths studio (`STUDIO_PLAN.md`)** — `pudding` as a **library** + an async
+`solve()` your own code can invoke, and a **marimo** notebook where you write maths and get maths
+back (many attempts fanned out, surfaced as an in-cell answer-distribution instrument; a generative
+conjecture→falsify→prove loop; results as frozen, citable markdown artifacts). **Parallelism rule:**
+match the fan-out primitive to the workload — **local `asyncio` + a Semaphore for rented
+generalists** (the provider's rate limit is the ceiling Modal can't bypass), and **Modal only when a
+per-call owns a sandbox/GPU** (the prover's Lean verifier, the `tools` kernel, a self-hosted model).
+`fanout.py` is the stale Modal template → repurpose for prover Pass@k, *not* the generalist path.
 
 ## 5. Phase C — the prover spike (GATED parking lot)
 
