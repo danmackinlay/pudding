@@ -127,7 +127,19 @@ def test_self_verify_uses_the_corrected_answer():
                                             seed=1, max_tokens=100)))
     f = _final(evts)
     assert f["boxed"] == "43"
+    assert f["candidate_boxed"] == "41"      # pass-1 answer, for the shim's ✓/⚠ verdict
     assert f["completion_tokens"] == 84      # both passes summed
+
+
+def test_thinking_trace_surfaces_as_thinking_delta():
+    # reasoning_content (the hidden trace) must stream on its own channel, separate from content.
+    client = AsyncFakeClient([("answer \\boxed{8}", "I should add the two parts…")])
+    evts = _run(_collect(cot_stream("q", client=client, model="m", temperature=0.0,
+                                    seed=None, max_tokens=100)))
+    thinking = "".join(e["text"] for e in evts if e["type"] == "thinking_delta")
+    content = "".join(e["text"] for e in evts if e["type"] == "reasoning_delta")
+    assert "I should add" in thinking and "I should add" not in content
+    assert "\\boxed{8}" in content
 
 
 # --- dispatch (solve_one_async) --------------------------------------------

@@ -61,11 +61,11 @@ direnv exec . uv run modal deploy executor/modal_executor.py  # remote executor 
 direnv exec . uv run modal run fanout.py --k 8                # maj@k over Modal .map
 #   self-host the model instead of metering:  modal deploy serve.py  +  set SOLVER_BASE_URL
 
-# chat UI — run the loop behind an OpenAI-compatible shim, then point Open WebUI at it
-direnv exec . uv run uvicorn shim:app --port 8000          # the TIR loop as /v1/chat/completions
+# workbench UI — the swappable solver behind an OpenAI-compatible shim; pick a (model × rung)
+direnv exec . uv run uvicorn shim:app --port 8000          # lineup × rung as /v1/chat/completions
 WEBUI_AUTH=False OPENAI_API_BASE_URLS=http://localhost:8000/v1 OPENAI_API_KEYS=dummy \
-  uvx --python 3.11 open-webui@latest serve --port 8080    # open http://localhost:8080 → tir-solver
-#   details + Docker fallback: OPEN_WEBUI.md
+  uvx --python 3.11 open-webui@latest serve --port 8080    # localhost:8080 → e.g. deepseek-v4-pro-cot / -deep
+#   the picker, rungs (cot / self-verify / maj@k-deep / tir) + Docker fallback: OPEN_WEBUI.md
 
 # prover (stage 2 — see PROVER_RESEARCH_ADDENDUM.md; uses a prebuilt Kimina image)
 ```

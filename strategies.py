@@ -76,6 +76,7 @@ async def _chat(client, model, messages, temperature, max_tokens, seed):
                 yield "delta", piece
             if rpiece:
                 reasoning += rpiece
+                yield "reasoning", rpiece     # thinking channel — surfaced separately (V1.2)
             if chunk.choices[0].finish_reason:
                 finish = chunk.choices[0].finish_reason
         if getattr(chunk, "usage", None):             # final usage chunk (include_usage)
@@ -92,11 +93,14 @@ async def _chat(client, model, messages, temperature, max_tokens, seed):
 
 
 async def _drain(client, model, messages, temperature, max_tokens, seed):
-    """Run one _chat, forwarding its visible text as reasoning_delta events; return the info."""
+    """Run one _chat, forwarding its visible text as reasoning_delta events and its hidden
+    reasoning trace as thinking_delta events; return the info."""
     info = {}
     async for kind, payload in _chat(client, model, messages, temperature, max_tokens, seed):
         if kind == "delta":
             yield "reasoning_delta", payload
+        elif kind == "reasoning":
+            yield "thinking_delta", payload
         else:
             info = payload
     yield "info", info
@@ -110,6 +114,8 @@ async def cot_stream(problem, *, client, model, temperature, seed, max_tokens) -
     async for kind, payload in _drain(client, model, msgs, temperature, max_tokens, seed):
         if kind == "reasoning_delta":
             yield ev("reasoning_delta", text=payload)
+        elif kind == "thinking_delta":
+            yield ev("thinking_delta", text=payload)
         else:
             info = payload
     boxed = extract_boxed(info.get("text", "")) or extract_boxed(info.get("reasoning", ""))
@@ -130,9 +136,12 @@ async def self_verify_stream(problem, *, client, model, temperature, seed, max_t
     async for kind, payload in _drain(client, model, msgs, temperature, max_tokens, seed):
         if kind == "reasoning_delta":
             yield ev("reasoning_delta", text=payload)
+        elif kind == "thinking_delta":
+            yield ev("thinking_delta", text=payload)
         else:
             c = payload
     candidate = c.get("text") or c.get("reasoning") or ""
+    candidate_boxed = extract_boxed(candidate)   # pass-1 answer — the shim renders the verdict
 
     yield ev("reasoning_delta", text="\n\n---\n**Verification pass**\n\n")
     vmsgs = [{"role": "system", "content": VERIFY_SYS},
@@ -142,15 +151,17 @@ async def self_verify_stream(problem, *, client, model, temperature, seed, max_t
     async for kind, payload in _drain(client, model, vmsgs, temperature, max_tokens, vseed):
         if kind == "reasoning_delta":
             yield ev("reasoning_delta", text=payload)
+        elif kind == "thinking_delta":
+            yield ev("thinking_delta", text=payload)
         else:
             v = payload
 
     boxed = extract_boxed(v.get("text", "")) or extract_boxed(v.get("reasoning", "")) \
-        or extract_boxed(candidate)
+        or candidate_boxed
     ctoks = (c.get("completion_tokens") or 0) + (v.get("completion_tokens") or 0)
     calls = [{"ttft_s": c.get("ttft_s"), "gen_s": c.get("gen_s"), "tok": c.get("completion_tokens")},
              {"ttft_s": v.get("ttft_s"), "gen_s": v.get("gen_s"), "tok": v.get("completion_tokens")}]
-    yield ev("final_answer", boxed=boxed,
+    yield ev("final_answer", boxed=boxed, candidate_boxed=candidate_boxed,
              transcript=f"{candidate}\n\n--- verification ---\n{v.get('text') or v.get('reasoning', '')}",
              elapsed_s=round(time.perf_counter() - t0, 2), completion_tokens=ctoks,
              truncated="length" in (c.get("finish_reason"), v.get("finish_reason")),

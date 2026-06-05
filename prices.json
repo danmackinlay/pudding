@@ -1,0 +1,7 @@
+{
+  "_comment": "OpenRouter output prices ($/M tokens), for the workbench cost footer (est$ = completion_tokens × out / 1e6). Static + drifts — refresh from OpenRouter /models when it matters (WORKBENCH_PLAN §6). Keyed by the provider model id. Reusable by audition.py.",
+  "deepseek/deepseek-v4-pro": {"out": 0.87},
+  "moonshotai/kimi-k2.6": {"out": 3.42},
+  "qwen/qwen3.7-max": {"out": 3.75},
+  "Qwen/Qwen2.5-Math-72B-Instruct": {"out": 0.0}
+}

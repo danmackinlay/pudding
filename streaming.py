@@ -21,10 +21,12 @@ from typing import Iterable, Iterator
 # so adding the prover types never touches solver-side code.
 #
 # Solver:
-#   {"type": "reasoning_delta", "text": str}         # a raw model token chunk (pre-FOIM)
+#   {"type": "reasoning_delta", "text": str}         # a visible-content token chunk (pre-FOIM)
+#   {"type": "thinking_delta",  "text": str}         # a hidden reasoning_content chunk (collapsible)
 #   {"type": "code",           "lang": str, "code": str}
 #   {"type": "tool_result",    "output": str}
-#   {"type": "final_answer",   "boxed": str|None, "transcript": str}
+#   {"type": "final_answer",   "boxed": str|None, "transcript": str, ...}
+#        # optional trust fields, additive: candidate_boxed (self_verify pass-1), agreement+k (maj@k)
 #   {"type": "error",          "message": str}
 # Prover (reserved, stage 2):
 #   {"type": "proof",      "lang": "lean4", "code": str}
