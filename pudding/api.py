@@ -14,7 +14,9 @@ from . import lineup, store
 from .jobs import Job, Lane, Result, result_from_dict, result_to_dict
 
 DEFAULT_MAX_TOKENS = 16384         # thinking shares the budget; a stingy cap empties \boxed{}
-DEFAULT_CONCURRENCY = 8
+DEFAULT_CONCURRENCY = 16           # exploit online-inference parallelism — OpenRouter handles ~20
+                                   # inflight (the audition ran at 16); stingy providers set a lower
+                                   # per-row `concurrency` in contenders.jsonl. NOT a Modal job.
 DEFAULT_MODELS = lineup.default_models()
 
 
@@ -58,6 +60,25 @@ def get(job_id: str) -> Job | None:
     """Reload a persisted job by id (reconnect from a cron / agent / reopened notebook)."""
     d = store.read(job_id)
     return Job.from_dict(d) if d else None
+
+
+def recent(n: int = 10) -> list[dict]:
+    """Recent runs as summaries (newest first) — the reuse browser's source. Reads the job store;
+    each row: {id, problem, answer, agreement, status, created}. The id is the durable handle
+    (reload with `get`); the artifact, not the cell, is the unit of work (STUDIO_PLAN P5)."""
+    out = []
+    for jid in store.list_ids():
+        d = store.read(jid)
+        if not d:
+            continue
+        r = d.get("result") or {}
+        prov = r.get("provenance") or {}
+        out.append({"id": jid,
+                    "problem": (prov.get("problem") or d.get("spec", {}).get("problem") or "")[:70],
+                    "answer": r.get("answer"), "agreement": f"{r.get('count', 0)}/{r.get('n_answered', 0)}",
+                    "status": d.get("status"), "created": prov.get("created") or 0.0})
+    out.sort(key=lambda s: s["created"], reverse=True)
+    return out[:n]
 
 
 def _content_id(result: Result) -> str:

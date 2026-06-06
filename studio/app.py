@@ -21,7 +21,7 @@ __generated_with = "0.23.9"
 app = marimo.App(width="medium")
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _():
     import asyncio
     import os
@@ -46,7 +46,7 @@ def _():
     return asyncio, lineup, mo, pudding
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo):
     mo.md("""
     # pudding studio
@@ -55,14 +55,20 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(mo, pudding):
-    def board(*, progress=None, total=None, result=None):
+    def board(*, progress=None, total=None, result=None, job_id=None):
         """The answer-cluster board: a live progress list while attempts land, then the voted
-        answer + cluster table + per-attempt transcripts. Pure render over pudding's view-model."""
+        answer + an id line + copy-out + cluster table + per-attempt transcripts. Pure render."""
         if result is not None:
             vm = pudding.view_model(result)
-            blocks = [mo.md(pudding.render(result))]      # headline · agreement · footer (or error)
+            md = pudding.render(result)
+            blocks = [mo.md(md)]                          # headline · agreement · footer (or error)
+            ids = " · ".join(s for s in [f"job `{job_id}`" if job_id else "",
+                                         f"pin `{vm['pin']}`" if vm.get("pin") else ""] if s)
+            if ids:
+                blocks.append(mo.md(f"<small>{ids}</small>"))
+            blocks.append(mo.accordion({"📋 copy artifact (markdown)": mo.md(f"```\n{md}\n```")}))
             if len(vm["clusters"]) > 1:
                 blocks.append(mo.ui.table(
                     [{"answer": c["answer"], "votes": c["count"], "models": ", ".join(c["models"])}
@@ -98,7 +104,7 @@ def _(lineup, mo):
     return k, models, problem, run
 
 
-@app.cell
+@app.cell(hide_code=True)
 async def _(asyncio, board, k, mo, models, problem, pudding, run):
     mo.stop(not run.value,
             mo.md("◦ press **Solve** to fan out — interrupt (■) or press Solve again to restart."))
@@ -112,13 +118,58 @@ async def _(asyncio, board, k, mo, models, problem, pudding, run):
                 attempts.append(ev)
                 mo.output.replace(board(progress=attempts, total=total))
         result = await job
-        mo.output.replace(board(result=result))
+        mo.output.replace(board(result=result, job_id=job.id))
     except asyncio.CancelledError:
         mo.output.replace(mo.md(f"⏹ **stopped** — {len(attempts)}/{total} samples."))
         raise
     finally:
         if job.status not in ("done", "error"):
             job.cancel()     # marimo interrupt / Solve re-press → kill the in-flight fan-out
+    return
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    refresh = mo.ui.run_button(label="↻ refresh")
+    return (refresh,)
+
+
+@app.cell(hide_code=True)
+def _(mo, pudding, refresh):
+    _ = refresh.value                                  # re-read the list when refresh is clicked
+    runs = pudding.recent(20)                          # newest runs from the job store (any session)
+    options = {f"{(s['answer'] or '∅')} · {s['problem']}  [{s['id']}]": s["id"] for s in runs}
+    pick = mo.ui.dropdown(options=options or {"(no past runs yet)": ""}, label="recent runs")
+    by_id = mo.ui.text(placeholder="…or paste a job / pin id", label="load by id")
+    mo.vstack([mo.md("### ♻ Reuse a past run — the durable unit is the id, not the cell"),
+               mo.hstack([pick, refresh], justify="start", gap=2), by_id])
+    return by_id, pick
+
+
+@app.cell(hide_code=True)
+def _(board, by_id, mo, pick, pudding):
+    rid = (by_id.value or "").strip() or pick.value
+    mo.stop(not rid, mo.md("◦ pick a recent run or paste an id to reuse it."))
+    loaded_job = pudding.get(rid)                      # a Job…
+    reused = loaded_job._result if (loaded_job and loaded_job._result) else pudding.get_pin(rid)  # …or a pin
+    mo.stop(reused is None, mo.md(f"◦ no run found for `{rid}`."))
+    board(result=reused, job_id=rid)                   # the loaded board (copy-out + id inside)
+    return (reused,)
+
+
+@app.cell(hide_code=True)
+def _(mo, reused):
+    _ = reused                                         # only show pin once a result is loaded
+    pin_btn = mo.ui.run_button(label="📌 pin → citable id")
+    pin_btn
+    return (pin_btn,)
+
+
+@app.cell(hide_code=True)
+def _(mo, pin_btn, pudding, reused):
+    mo.stop(not pin_btn.value, mo.md(""))
+    pinned = pudding.pin(reused)
+    mo.md(f"📌 pinned as `{pinned.pin}` — frozen + reproducible; reload with this id.")
     return
 
 

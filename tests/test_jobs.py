@@ -217,6 +217,18 @@ def test_all_errored_headline_is_honest():
     assert "failed" in md and "errored" in md and "Connection error" in md   # not a bland "No answer"
 
 
+def test_recent_lists_summaries_newest_first():
+    _use(_fake_solve_one_async)
+    j1 = api.solve("alpha problem", k=1, models=["deepseek-v4-pro"]); j1.result()
+    j2 = api.solve("beta problem", k=1, models=["deepseek-v4-pro"]); j2.result()
+    rec = api.recent(50)
+    ids = [s["id"] for s in rec]
+    assert j1.id in ids and j2.id in ids
+    assert ids.index(j2.id) < ids.index(j1.id)          # newest first
+    s = next(s for s in rec if s["id"] == j2.id)
+    assert s["problem"].startswith("beta") and s["answer"] == "144"
+
+
 def test_timeout_caps_each_attempt():
     async def _slow(problem, *, strategy, model, provider, temperature, seed, max_tokens, **kw):
         await asyncio.sleep(30)                            # would hang without the cap
