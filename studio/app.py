@@ -10,28 +10,43 @@ reactive shell — all fan-out / clustering / artifacts live in the headless `pu
 
 Marimo is an OPTIONAL consumer (`pudding[studio]`): it imports pudding, never the reverse.
 """
+
 import marimo
 
+__generated_with = "0.23.9"
 app = marimo.App(width="medium")
 
 
 @app.cell
 def _():
+    import os
+    import sys
+
     import marimo as mo
+
+    # marimo puts the notebook's dir (studio/) on sys.path, not the repo root — so bootstrap the
+    # root (the dir containing the `pudding` package) by walking up from cwd / the notebook dir.
+    for _b in (os.getcwd(), *sys.path[:1]):
+        _p = os.path.abspath(_b)
+        while _p != os.path.dirname(_p):
+            if os.path.isfile(os.path.join(_p, "pudding", "__init__.py")):
+                if _p not in sys.path:
+                    sys.path.insert(0, _p)
+                break
+            _p = os.path.dirname(_p)
 
     import pudding
     from pudding import lineup
+
     return lineup, mo, pudding
 
 
 @app.cell
 def _(mo):
-    mo.md(
-        """
-        # pudding studio
-        *write maths, get maths back* — fan out many attempts, read the spread, keep the working.
-        """
-    )
+    mo.md("""
+    # pudding studio
+    *write maths, get maths back* — fan out many attempts, read the spread, keep the working.
+    """)
     return
 
 
