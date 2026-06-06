@@ -18,4 +18,11 @@ dependencies = [
     # "kimina-client",   # client for the Kimina Lean Server = the prover's verifier
 ]
 
+# Optional consumers — the core `pudding` library has ZERO frontend deps (STUDIO_PLAN §2); the
+# studio is opt-in. Install with: uv run --extra studio …  (or `pip install pudding[studio]`).
+[project.optional-dependencies]
+studio = [
+    "marimo",          # the reactive notebook surface (studio/app.py) — imports pudding, not vice versa
+]
+
 # Versions are starting guesses — see PLAN.md. Nothing here has been run yet.

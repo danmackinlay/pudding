@@ -73,6 +73,7 @@ class Result:
     models: list[str]
     markdown: str
     provenance: dict
+    pin: str | None = None        # set by pudding.pin() — a content-addressed frozen id
 
 
 # --- clustering / reduction ------------------------------------------------
@@ -130,6 +131,18 @@ def _prov(spec: dict, attempts: list[Attempt], error: str | None = None) -> dict
     if error:
         p["error"] = error
     return p
+
+
+# --- (de)serialization (shared by the job store and pin store) -------------
+def result_to_dict(r: Result) -> dict:
+    return asdict(r)
+
+
+def result_from_dict(d: dict) -> Result:
+    d = dict(d)
+    d["clusters"] = [Cluster(**c) for c in d.get("clusters", [])]
+    d["attempts"] = [Attempt(**a) for a in d.get("attempts", [])]
+    return Result(**d)
 
 
 # --- the fan-out -----------------------------------------------------------
@@ -221,6 +234,32 @@ class Job:
             self._task.cancel()
         self.status = "cancelled"
 
+    async def widen(self, k: int | None = None) -> Result:
+        """Buy more confidence: add k more seeded samples per model (continuing the seed
+        numbering so they actually diverge), re-cluster, re-render, re-persist. Awaits the
+        initial run first if needed. `await job.widen(5)` (sync callers: asyncio.run)."""
+        if self._result is None:
+            await self._await()
+        add = k or self.spec["k"]
+        start = max((a.seed for a in self.attempts), default=-1) + 1
+        info = {a.model: (a.provider, a.model_id) for a in self.attempts}
+        new_lanes = [Lane(name=n, provider=info.get(n, (None, n))[0],
+                          model=info.get(n, (None, n))[1], strategy=self.spec["strategy"],
+                          seed=s, temperature=0.6)
+                     for n in self.spec["model_names"] for s in range(start, start + add)]
+        new = await _collect(self.spec["problem"], new_lanes, max_tokens=self.spec["max_tokens"],
+                             concurrency=self.spec["concurrency"], emit=self._emit)
+        self.attempts = sorted(self.attempts + new, key=lambda a: (a.model, a.seed))
+        self.spec["k"] = self.spec["k"] + add          # maj@k now reflects the wider sample
+        self._result = _reduce(self.attempts, self.spec)
+        self.status = "done"
+        self._emit(ev("widened", added=len(new), answer=self._result.answer))
+        try:
+            store.write(self.id, self.to_dict())
+        except Exception:
+            pass
+        return self._result
+
     # internals -------------------------------------------------------------
     def _emit(self, event: dict) -> None:
         if self.on_event is not None:
@@ -270,8 +309,5 @@ class Job:
         job.attempts = [Attempt(**a) for a in d.get("attempts", [])]
         r = d.get("result")
         if r is not None:
-            r = dict(r)
-            r["clusters"] = [Cluster(**c) for c in r.get("clusters", [])]
-            r["attempts"] = [Attempt(**a) for a in r.get("attempts", [])]
-            job._result = Result(**r)
+            job._result = result_from_dict(r)
         return job

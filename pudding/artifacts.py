@@ -72,3 +72,45 @@ def render(obj, target: str = "plain") -> str:
     target: 'plain'/'quarto' keep ``$…$``; 'owui' rewrites to ``\\(…\\)`` (Open WebUI)."""
     md = obj.markdown if hasattr(obj, "markdown") else str(obj)
     return normalize_delimiters(md) if target == "owui" else md
+
+
+# --- view-model + static render (the library owns these; live widgets live in studio/) ------
+def view_model(result) -> dict:
+    """The data a frontend renders, as a plain dict — the answer-cluster board's rows + summary.
+    A reactive shell (marimo) wraps this in controls; a static doc embeds `to_html`. Decision #9."""
+    return {
+        "answer": result.answer,
+        "agreement": f"{result.count}/{result.n_answered}" if result.n_answered else "0/0",
+        "agreement_frac": result.agreement,
+        "cross_model": result.cross_model,
+        "tokens": result.tokens,
+        "cost": result.cost,
+        "k": result.k,
+        "models": list(result.models),
+        "pin": getattr(result, "pin", None),
+        "clusters": [{"answer": c.answer, "count": c.count, "models": list(c.models)}
+                     for c in result.clusters],
+        "attempts": [{"model": a.model, "seed": a.seed, "boxed": a.boxed, "tokens": a.tokens,
+                      "error": a.error, "transcript": a.transcript} for a in result.attempts],
+    }
+
+
+def to_html(result) -> str:
+    """A minimal static render of the answer-cluster board (for Quarto / any non-interactive
+    embed): the headline, a cluster table, and collapsible per-attempt transcripts."""
+    vm = view_model(result)
+    head = ("<p><b>No answer</b> — the samples produced no boxed result.</p>"
+            if vm["answer"] is None else
+            f"<p><b>\\({vm['answer']}\\)</b> · agreement {vm['agreement']}"
+            f"{' · cross-model ✓' if vm['cross_model'] else ''}</p>")
+    rows = "".join(f"<tr><td>\\({c['answer']}\\)</td><td>{c['count']}</td>"
+                   f"<td>{', '.join(c['models'])}</td></tr>" for c in vm["clusters"])
+    table = (f"<table><thead><tr><th>answer</th><th>votes</th><th>models</th></tr></thead>"
+             f"<tbody>{rows}</tbody></table>" if vm["clusters"] else "")
+    cost = f" · ~${vm['cost']:.4f}" if vm["cost"] is not None else ""
+    foot = f"<p><small>— maj@{vm['k']} · {', '.join(vm['models'])} · {vm['tokens']} tok{cost}</small></p>"
+    details = "".join(
+        f"<details><summary>{a['model']} #{a['seed']} → "
+        f"{a['boxed'] if a['boxed'] is not None else '∅'}</summary>"
+        f"<pre>{a['transcript'] or a['error'] or ''}</pre></details>" for a in vm["attempts"])
+    return f"<div class='pudding-board'>{head}{table}{foot}{details}</div>"

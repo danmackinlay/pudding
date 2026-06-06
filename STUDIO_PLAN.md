@@ -235,15 +235,22 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
 
 ## 5. Build order (phases)
 
-- **P1 — the library + job layer (solver-only; buildable NOW).** `pudding.solve` (async) + `Job` +
-  store + the markdown artifact, over local-`asyncio` fan-out (the `solve_one_async` ×k collector +
-  `solve_graded_async`'s reducer); `backend="modal"` deferred to the prover. **DoD:** `import
-  pudding; await pudding.solve(...)` from any script returns a persistent job and a markdown result;
-  detach-and-reconnect works. *This is the "function call my code invokes asynchronously," delivered.*
-- **P2 — the notebook app (the studio).** marimo reference app: markdown cells (paste in / copy
-  out), `solve` → the inline **answer-cluster board** (clusters, cross-model consensus, cost dial,
-  kill switch, add-more, transcript drill-in), notebook persistence binding cells to job ids. **DoD:**
-  write/paste a problem, run it, watch the fleet resolve *in your document*, copy the result out.
+- **P1 — the library + job layer (solver-only). ✅ BUILT** (`pudding/`). `solve`/`get` + `Job`
+  (`await` / `.result()` / `.stream()` / `.cancel()` / `.widen(k)`, store-backed) over local-asyncio
+  fan-out (`solve_one_async` ×k collector + clustering by `eval._norm_latex`, within/cross-model
+  agreement — the collector keeps every sample). `pin`/`get_pin` (content-addressed frozen artifacts),
+  `view_model`/`to_html` (decision #9 — the library's static view; widgets stay in `studio/`),
+  `render(target=)`. Headless, zero frontend deps; opt-in `on_event`. `backend="modal"` deferred to
+  the prover. 11 headless tests; live cross-model smoke (4/4 → 144). *The async function call your
+  code can invoke — delivered.*
+- **P2 — the notebook app (the studio). 🚧 SCAFFOLDED** (`studio/app.py`, `pudding[studio]` extra).
+  marimo reference app: paste a problem, model multiselect (from the lineup) + k slider, a Solve
+  run-button → `pudding.solve` → the inline **answer-cluster board** (cluster table + cross-model
+  flag + footer) and per-attempt transcript drill-in, over `view_model` (thin shell, decision #9).
+  Builds headless; **interactive run is the user's to drive** (`uv run --extra studio marimo run
+  studio/app.py`). **Remaining:** live stream-fill via `job.stream()`, the cost dial / kill-switch /
+  add-more (`widen`) controls, copy-out + `pin`, and binding cells to job ids for detach/reload.
+  **DoD:** write/paste a problem, run it, watch the fleet resolve *in your document*, copy the result out.
 - **P3 — the generative loop.** `conjecture` (AI gen from selection/corpus/data) + `falsify`
   (Kernel oracle, parallel) + the thinning-flock widget + survivors→`solve` fan-out. **DoD:** from a
   context, generate hypotheses, auto-cull the false ones cheaply, surface candidates worth proving.

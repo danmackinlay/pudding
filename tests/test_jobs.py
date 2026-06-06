@@ -121,6 +121,44 @@ def test_modal_backend_is_deferred():
         assert "modal" in str(e).lower()
 
 
+def test_pin_freezes_content_addressed_and_reloads():
+    _use(_fake_solve_one_async)
+    res = api.solve("q", k=2, models=["deepseek-v4-pro"]).result()
+    pinned = pudding.pin(res)
+    assert pinned.pin and len(pinned.pin) == 12
+    assert pudding.pin(res).pin == pinned.pin            # content-addressed → deterministic id
+    loaded = pudding.get_pin(pinned.pin)
+    assert loaded is not None and loaded.answer == "144"
+    assert loaded.markdown == res.markdown               # re-renders identically
+    assert pudding.get_pin("deadbeefcafe") is None
+
+
+def test_widen_adds_samples_and_reclusters():
+    _use(_fake_solve_one_async)
+
+    async def run():
+        job = api.solve("q", k=2, models=["deepseek-v4-pro", "kimi-k2-6"])
+        r1 = await job
+        assert r1.n_total == 4 and r1.k == 2
+        return await job.widen(2)                        # +2 per model
+
+    r2 = asyncio.run(run())
+    assert r2.n_total == 8 and r2.k == 4
+    assert sorted({a.seed for a in r2.attempts}) == [0, 1, 2, 3]   # new seeds, no collision
+    assert "maj@4" in r2.markdown
+
+
+def test_view_model_and_html():
+    _use(_fake_solve_one_async)
+    res = api.solve("q", k=2, models=["deepseek-v4-pro", "kimi-k2-6"]).result()
+    vm = pudding.view_model(res)
+    assert vm["answer"] == "144" and vm["agreement"] == "2/4"
+    assert {c["answer"] for c in vm["clusters"]} == {"144", "142"}
+    assert len(vm["attempts"]) == 4
+    html = pudding.to_html(res)
+    assert "144" in html and "<table>" in html and "<details>" in html
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

@@ -6,10 +6,12 @@ immediately — scheduling it on the running event loop if there is one, else la
 STUDIO_PLAN §2 — Modal can't raise a rented provider's rate-limit ceiling).
 """
 import asyncio
+import hashlib
+import json
 import uuid
 
 from . import lineup, store
-from .jobs import Job, Lane
+from .jobs import Job, Lane, Result, result_from_dict, result_to_dict
 
 DEFAULT_MAX_TOKENS = 16384         # thinking shares the budget; a stingy cap empties \boxed{}
 DEFAULT_CONCURRENCY = 8
@@ -52,3 +54,30 @@ def get(job_id: str) -> Job | None:
     """Reload a persisted job by id (reconnect from a cron / agent / reopened notebook)."""
     d = store.read(job_id)
     return Job.from_dict(d) if d else None
+
+
+def _content_id(result: Result) -> str:
+    """Stable content address for a run — its inputs + per-sample answers + the verdict, minus
+    the wall-clock (so identical content addresses identically)."""
+    p = result.provenance
+    key = {"problem": p.get("problem"), "k": p.get("k"), "models": p.get("models"),
+           "strategy": p.get("strategy"), "answer": result.answer,
+           "samples": sorted((a.get("model"), a.get("seed"), a.get("boxed"))
+                             for a in p.get("attempts", []))}
+    blob = json.dumps(key, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode()).hexdigest()[:12]
+
+
+def pin(result: Result) -> Result:
+    """Freeze a (stochastic) run into a content-addressed, provenance-stamped artifact, persisted
+    for reproducible re-render — the marimo-lab → Quarto-publication hop (STUDIO_PLAN §3). Returns
+    the same Result with `.pin` set; reload with `get_pin(id)`."""
+    result.pin = _content_id(result)
+    store.write_pin(result.pin, result_to_dict(result))
+    return result
+
+
+def get_pin(pin_id: str) -> Result | None:
+    """Reload a pinned (frozen) result by its content id — re-renders identically."""
+    d = store.read_pin(pin_id)
+    return result_from_dict(d) if d else None
