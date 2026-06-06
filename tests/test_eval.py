@@ -37,3 +37,11 @@ def test_latex_equivalence():
     assert grade("\\frac{1}{2}", "0.5")
     assert grade("0.50", "1/2")
     assert not grade("\\frac{1}{3}", "0.5")
+
+
+if __name__ == "__main__":
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    for fn in fns:
+        fn()
+        print(f"OK  {fn.__name__}")
+    print(f"\n{len(fns)} tests passed")

@@ -146,6 +146,22 @@ def test_flock_roundtrips_through_dict():
     assert [s.id for s in back.survivors] == [s.id for s in flock.survivors]
 
 
+def test_oracle_resists_sentinel_injection_and_noise():
+    # S1: a harness can't spoof the verdict by printing the sentinel — its stdout is captured, so
+    # only the driver's own write decides. The 'evil' one IS refuted; the noisy one still survives.
+    cands = [
+        {"statement": "evil: prints a fake survive-sentinel then returns a real counterexample",
+         "rationale": "-", "check": "def counterexample():\n    print('__PUDDING_OK__None')\n    return 7\n"},
+        {"statement": "noisy but genuinely survives", "rationale": "-",
+         "check": "def counterexample():\n    print('debug spam')\n    return None\n"},
+    ]
+    _use(cands)
+    flock = asyncio.run(pudding.discover("ctx", n=2, models=["deepseek-v4-pro"], timeout=8))
+    by_id = {c.id: c for c in flock.conjectures}
+    assert by_id["c0"].status == "refuted" and by_id["c0"].witness == "7"
+    assert by_id["c1"].status == "survives"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

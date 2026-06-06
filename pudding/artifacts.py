@@ -74,9 +74,15 @@ def _footer(result) -> str:
     return " · ".join(parts)
 
 
+_RENDER_TARGETS = ("plain", "quarto", "owui")
+
+
 def render(obj, target: str = "plain") -> str:
     """Adapt the canonical artifact to a frontend's math dialect. `obj` is a Result or markdown.
-    target: 'plain'/'quarto' keep ``$…$``; 'owui' rewrites to ``\\(…\\)`` (Open WebUI)."""
+    'plain'/'quarto' keep the canonical ``$…$`` (paper/Quarto-native — no transform yet); 'owui'
+    rewrites inline ``$…$`` → ``\\(…\\)`` for Open WebUI. Unknown targets raise (no silent passthrough)."""
+    if target not in _RENDER_TARGETS:
+        raise ValueError(f"unknown render target {target!r}; known: {', '.join(_RENDER_TARGETS)}")
     md = obj.markdown if hasattr(obj, "markdown") else str(obj)
     return normalize_delimiters(md) if target == "owui" else md
 

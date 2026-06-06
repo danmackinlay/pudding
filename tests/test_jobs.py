@@ -259,6 +259,38 @@ def test_timeout_caps_each_attempt():
     assert all("timeout" in (a.error or "") for a in res.attempts)
 
 
+def test_recent_survives_a_corrupt_file():
+    # R2: one truncated/garbage file must not crash the whole recent()/get() scan (corrupt ≡ missing).
+    from pudding import store
+    _use(_fake_solve_one_async)
+    good = api.solve("good problem", k=1, models=["deepseek-v4-pro"]); good.result()
+    (store._ROOT / "corruptjob.json").write_text("{ this is not valid json")   # simulate a crash mid-write
+    ids = [s["id"] for s in api.recent(100)]                # must not raise
+    assert good.id in ids and "corruptjob" not in ids
+    assert api.get("corruptjob") is None                    # corrupt reloads as missing, not a crash
+
+
+def test_store_write_is_atomic_no_partial_file():
+    # R2: a successful write leaves exactly the .json (no leftover temp), and re-reads identically.
+    from pudding import store
+    _use(_fake_solve_one_async)
+    job = api.solve("atomic", k=1, models=["deepseek-v4-pro"]); job.result()
+    assert (store._ROOT / f"{job.id}.json").exists()
+    assert not list(store._ROOT.glob(f".{job.id}.*.tmp"))   # temp cleaned up by os.replace
+    assert api.get(job.id)._result.answer == "144"
+
+
+def test_solve_many_requires_a_running_loop():
+    # R1: called sync (no loop), it raises a CLEAR error instead of a later 'bound to a different
+    # event loop' crash from the shared Semaphore.
+    _use(_fake_solve_one_async)
+    try:
+        api.solve_many(["a", "b"], k=1, models=["deepseek-v4-pro"])
+        assert False, "expected RuntimeError without a running loop"
+    except RuntimeError as e:
+        assert "running event loop" in str(e)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

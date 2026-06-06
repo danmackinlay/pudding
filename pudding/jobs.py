@@ -10,6 +10,7 @@ the client can detach and reconnect. Interactivity is opt-in: `on_event` / `stre
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import asdict, dataclass, field
 
@@ -81,7 +82,7 @@ class Result:
 def _cluster_key(boxed: str | None):
     if not boxed:
         return None
-    s = _norm_latex(boxed).strip()
+    s = _norm_latex(boxed).strip().strip("$").strip()   # \boxed{$143$} clusters with \boxed{143}
     num = _as_number(s)
     if num is not None:
         if isinstance(num, float) and num.is_integer():
@@ -206,6 +207,7 @@ class Job:
         self._queue: asyncio.Queue | None = None
         self._sem = sem            # shared rate budget across a batch (solve_many); None = own
         self._seen = 0             # live completed-attempt counter (for non-blocking grid polling)
+        self._persist_error: str | None = None   # last store.write failure (so it's not silent)
 
     @property
     def total(self) -> int:
@@ -243,7 +245,7 @@ class Job:
         await self._task
         return self._result
 
-    def result(self, timeout: float | None = None) -> Result:
+    def result(self) -> Result:
         """Block for the result (sync contexts). In an event loop, use `await job` instead."""
         if self._result is not None:
             return self._result
@@ -280,9 +282,13 @@ class Job:
         add = k or self.spec["k"]
         start = max((a.seed for a in self.attempts), default=-1) + 1
         info = {a.model: (a.provider, a.model_id) for a in self.attempts}
+        # Widening MUST diverge to add information, so force temperature>0: reuse the run's own
+        # temperature, but a deterministic base (k==1 → 0.0) falls back to 0.6 (0.0 is falsy) —
+        # else the "extra" samples would be byte-identical and buy no confidence.
+        temperature = self.spec.get("temperature") or 0.6
         new_lanes = [Lane(name=n, provider=info.get(n, (None, n))[0],
                           model=info.get(n, (None, n))[1], strategy=self.spec["strategy"],
-                          seed=s, temperature=0.6)
+                          seed=s, temperature=temperature)
                      for n in self.spec["model_names"] for s in range(start, start + add)]
         new = await _collect(self.spec["problem"], new_lanes, max_tokens=self.spec["max_tokens"],
                              concurrency=self.spec["concurrency"], emit=self._emit,
@@ -292,10 +298,7 @@ class Job:
         self._result = _reduce(self.attempts, self.spec)
         self.status = "done"
         self._emit(ev("widened", added=len(new), answer=self._result.answer))
-        try:
-            store.write(self.id, self.to_dict())
-        except Exception:
-            pass
+        self._persist()
         return self._result
 
     # internals -------------------------------------------------------------
@@ -309,6 +312,16 @@ class Job:
                 pass
         if self._queue is not None:
             self._queue.put_nowait(event)
+
+    def _persist(self) -> None:
+        """Best-effort store.write — never crash the run, but never silently lose it either:
+        a failure lands in `self._persist_error` (and a debug log) so it's discoverable."""
+        try:
+            store.write(self.id, self.to_dict())
+            self._persist_error = None
+        except Exception as e:        # noqa: BLE001
+            self._persist_error = repr(e)
+            logging.getLogger(__name__).debug("job %s persist failed: %r", self.id, e)
 
     async def _run(self) -> Result:
         self.status = "running"
@@ -331,10 +344,7 @@ class Job:
                       status=self.status))
         if self._queue is not None:
             self._queue.put_nowait(_DONE)
-        try:
-            store.write(self.id, self.to_dict())
-        except Exception:
-            pass
+        self._persist()
         return self._result
 
     # persistence -----------------------------------------------------------

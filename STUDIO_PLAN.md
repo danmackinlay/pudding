@@ -189,7 +189,7 @@ import pudding
 
 # submit returns immediately — a persistent, cancellable handle
 job = pudding.solve("Find the remainder when 7^999 is divided by 1000.",
-                    k=8, models=["deepseek-v4-pro", "qwen3.7-max"], budget="$0.50")
+                    k=8, models=["deepseek-v4-pro", "qwen3.7-max"])   # budget=… deferred (see §6)
 
 job.id                                   # survives this process (store-backed)
 async for ev in job.stream():            # live multiplexed fleet events (per-attempt envelopes)
@@ -201,7 +201,8 @@ result.markdown                          # copy-pasteable canonical artifact (La
 
 # interactivity is OPT-IN — nothing here imports a frontend
 job = pudding.solve(problem, on_event=sink)   # optional progress sink: a UI, a logger, or nothing
-job.widen(k=5); job.cancel(); job.budget = "$1"   # plain methods — a UI just binds buttons to them
+job.widen(k=5); job.cancel()              # plain methods — a UI just binds buttons to them
+                                          # (job.budget = "$1" is illustrative — cost-budget deferred, §6)
 later = pudding.get(job.id)              # reconnect from a cron / agent / reopened notebook
 
 # lab → publication: freeze a stochastic run, re-render per frontend
@@ -221,7 +222,8 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
 - `Job = {id, spec, attempts: [Attempt], status, result, cost}`; `Attempt =
   {lane: (model,rung,seed,budget), envelope-stream, outcome}`. `spec.reducer ∈
   {vote, cross_model_consensus, first_verified, ranked_verified}`. Controls — `cancel()`,
-  `widen(k)`, `budget` — are plain methods (work headless; a UI just binds buttons to them).
+  `widen(k)` — are plain methods (work headless; a UI just binds buttons to them). `budget` is
+  designed-but-deferred (cost-budget semantics are an open question, §6).
 - **Markdown artifact** = rendered canonical markdown+LaTeX **+** a structured sidecar (answer,
   distribution, per-attempt provenance, cost, verification status) in front-matter / a fenced
   metadata block — so results **round-trip**: paste into a paper, *or* feed back as `conjecture`
@@ -241,7 +243,8 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
   agreement — the collector keeps every sample). `pin`/`get_pin` (content-addressed frozen artifacts),
   `view_model`/`to_html` (decision #9 — the library's static view; widgets stay in `studio/`),
   `render(target=)`. Headless, zero frontend deps; opt-in `on_event`. `backend="modal"` deferred to
-  the prover. 11 headless tests; live cross-model smoke (4/4 → 144). *The async function call your
+  the prover. 11 P1 headless tests (now 62 across the whole suite — run `tests/run_all.py`); live
+  cross-model smoke (4/4 → 144). *The async function call your
   code can invoke — delivered.*
 - **P2 — the notebook app (the studio). 🚧 SCAFFOLDED** (`studio/app.py`, `pudding[studio]` extra).
   marimo reference app: paste a problem, model multiselect (from the lineup) + k slider, a Solve

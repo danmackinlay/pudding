@@ -92,6 +92,11 @@ async def _chat(client, model, messages, temperature, max_tokens, seed):
                    "decode_tok_s": round(decode, 1) if decode is not None else None}
 
 
+# Public alias: one streamed chat call yielding ('delta'|'reasoning'|'done', payload). Other
+# library code (pudding.discovery) builds on this — import the public name, not the underscore one.
+stream_chat = _chat
+
+
 async def _drain(client, model, messages, temperature, max_tokens, seed):
     """Run one _chat, forwarding its visible text as reasoning_delta events and its hidden
     reasoning trace as thinking_delta events; return the info."""

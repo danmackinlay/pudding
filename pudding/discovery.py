@@ -114,12 +114,12 @@ async def _propose_async(context: str, *, n: int, model: str, provider: str | No
     streamed chat (strategies._chat) so TTFT/usage plumbing and the reasoning-channel fallback
     are shared. Tests replace this with a scripted fake — the network-free seam."""
     from providers import make_async_client
-    from strategies import _chat
+    from strategies import stream_chat
     client = make_async_client(provider)
     msgs = [{"role": "system", "content": CONJECTURE_SYS},
             {"role": "user", "content": _user_prompt(context, n)}]
     text, info = "", {}
-    async for kind, payload in _chat(client, model, msgs, temperature, max_tokens, seed):
+    async for kind, payload in stream_chat(client, model, msgs, temperature, max_tokens, seed):
         if kind == "delta":
             text += payload
         elif kind == "done":
@@ -229,18 +229,20 @@ async def conjecture_async(context: str, *, n: int = 8, models: list[str] | None
 # Wrapping everything in try/except guarantees a sentinel (so a broken harness reads as an honest
 # 'error', not a silent survive); a runaway search is killed by the wall-clock timeout instead.
 _DRIVER = (
-    "import sys\n"
+    "import sys, io, contextlib\n"
     "_SRC = {src!r}\n"
     "_ns = {{}}\n"
-    "try:\n"
-    "    exec(_SRC, _ns)\n"
-    "    if 'counterexample' not in _ns:\n"
-    "        raise NameError('harness did not define counterexample()')\n"
-    "    _r = _ns['counterexample']()\n"
-    "except BaseException as _e:\n"
-    "    sys.stdout.write('__PUDDING_ERR__' + type(_e).__name__ + ': ' + str(_e)[:400])\n"
-    "else:\n"
-    "    sys.stdout.write('__PUDDING_OK__' + repr(_r)[:400])\n"
+    "_verdict = sys.stdout\n"                       # the ONE real channel the parser reads
+    "with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):\n"
+    "    try:\n"                                     # the harness's own prints can't reach _verdict,
+    "        exec(_SRC, _ns)\n"                      # so they can't spoof the sentinel (S1)
+    "        if 'counterexample' not in _ns:\n"
+    "            raise NameError('harness did not define counterexample()')\n"
+    "        _r = _ns['counterexample']()\n"
+    "        _out = '__PUDDING_OK__' + repr(_r)[:400]\n"
+    "    except BaseException as _e:\n"
+    "        _out = '__PUDDING_ERR__' + type(_e).__name__ + ': ' + str(_e)[:400]\n"
+    "_verdict.write(_out)\n"
 )
 
 

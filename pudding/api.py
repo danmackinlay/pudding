@@ -39,14 +39,16 @@ def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy
     if not names:
         raise ValueError("no models — pass models=[...] or populate contenders.jsonl")
     max_tokens = max_tokens or DEFAULT_MAX_TOKENS
+    temperature = 0.0 if k == 1 else 0.6           # k==1 → deterministic; k>1 → diverge the chains
     lanes = [Lane(name=name, provider=prov, model=model_id, strategy=strategy, seed=seed,
-                  temperature=0.0 if k == 1 else 0.6)
+                  temperature=temperature)
              for name in names
              for prov, model_id in [lineup.resolve(name, provider)]
              for seed in range(k)]
     spec = {"problem": problem, "k": k, "model_names": names, "strategy": strategy,
-            "max_tokens": max_tokens, "concurrency": concurrency, "timeout": timeout}
-    job = Job(uuid.uuid4().hex[:8], spec, lanes, on_event=on_event, sem=sem)
+            "max_tokens": max_tokens, "concurrency": concurrency, "timeout": timeout,
+            "temperature": temperature}
+    job = Job(uuid.uuid4().hex[:12], spec, lanes, on_event=on_event, sem=sem)   # 48 bits — headroom
     store.write(job.id, job.to_dict())             # persist as pending so the id is collectable
     try:
         loop = asyncio.get_running_loop()
@@ -63,8 +65,19 @@ def solve_many(problems: list[str], *, k: int = 2, models: list[str] | None = No
     """Launch one solve per problem, all sharing ONE rate budget (a single Semaphore sized at the
     provider's ceiling — NOT N × per-job). Returns the Job handles **immediately** (each scheduled
     on the running loop); poll `job.summary()` / `job.completed` for non-blocking live feedback —
-    don't await them in the launching cell (STUDIO_PLAN P6). The explore-a-space fan-out."""
-    shared = asyncio.Semaphore(concurrency)
+    don't await them in the launching cell (STUDIO_PLAN P6). The explore-a-space fan-out.
+
+    Requires a running event loop: the shared Semaphore binds to it, and the launch-don't-await
+    contract (handles you poll, not block on) only means anything inside one. A sync script should
+    `asyncio.run(...)` an async wrapper, or call `solve(...).result()` per problem."""
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        raise RuntimeError(
+            "solve_many() needs a running event loop (it shares one Semaphore across the batch and "
+            "returns handles to poll). Call it inside async code / a marimo cell, or wrap with "
+            "asyncio.run(); for one-off sync use, solve(p).result() per problem.") from None
+    shared = asyncio.Semaphore(concurrency)        # binds to the running loop; all jobs share it
     return [solve(p, k=k, models=models, strategy=strategy, timeout=timeout,
                   concurrency=concurrency, provider=provider, sem=shared) for p in problems]
 

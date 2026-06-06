@@ -161,3 +161,11 @@ def test_tools_rung_is_gated():
     evts = _run(_collect(generalist_stream("q", strategy="tools", model="m",
                                            client=AsyncFakeClient([]))))
     assert evts[-1]["type"] == "error" and "tools" in evts[-1]["message"].lower()
+
+
+if __name__ == "__main__":
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    for fn in fns:
+        fn()
+        print(f"OK  {fn.__name__}")
+    print(f"\n{len(fns)} tests passed")

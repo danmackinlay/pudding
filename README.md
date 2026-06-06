@@ -30,10 +30,19 @@ maj@k → self-verify → tool-check → Lean — and the repo is driven by an *
 
 - **Built + tested** (Phase A, network-free): the provider registry (`providers.py`), the
   generalist `cot`/`self_verify` rungs (`strategies.py`), and the strategy dispatch in
-  `solver_loop.py`, all on the shared streaming envelope — 24 tests pass.
+  `solver_loop.py`, all on the shared streaming envelope. Run the whole offline suite with
+  `direnv exec . uv run python tests/run_all.py` (62 tests across engine + library).
+- **Built + tested** (Phase C, the studio): the headless `pudding` library — async `solve`/
+  `solve_many` job fan-out, `conjecture`/`falsify` (the generative loop), content-addressed `pin`,
+  markdown artifacts — plus the optional marimo `studio/app.py` (`pudding[studio]`). See `STUDIO_PLAN.md`.
 - **Verified earlier** and reused as one contender: the `tir_fence` TIR loop end-to-end on
   Featherless, the local `Kernel`, the remote-executor swap, and the Open WebUI shim (`shim.py`).
-- **Gated:** the Lean prover (Phase C) — research frozen in `PROVER_RESEARCH_ADDENDUM.md`.
+- **Gated:** the Lean prover (Phase C/D) — research frozen in `PROVER_RESEARCH_ADDENDUM.md`.
+
+**Live vs parked.** Live: `pudding/` (the library) + `studio/app.py`, over the engine spine
+(`solver_loop`, `strategies`, `eval`, `providers`, `streaming`). Standalone CLIs: `audition.py`,
+`serve.py`. Parked for the gated prover (Phase D): `fanout.py` (Modal Pass@k), `prover_loop.py`,
+`verifier/`. `shim.py` is the alternate Open-WebUI frontend (a thin library consumer).
 
 > Why the pivot: Qwen2.5-Math-7B *and* 72B answer `7^999 mod 1000` as `43` (maj@8 unanimously
 > wrong) despite the kernel returning `143` — a systematic "won't trust the tool" failure. The
