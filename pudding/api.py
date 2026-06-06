@@ -23,7 +23,7 @@ DEFAULT_MODELS = lineup.default_models()
 def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy: str = "cot",
           max_tokens: int | None = None, concurrency: int = DEFAULT_CONCURRENCY,
           timeout: float | None = None, backend: str = "local", provider: str | None = None,
-          on_event=None) -> Job:
+          on_event=None, sem=None) -> Job:
     """Fan out k seeded samples per model, vote + cluster the answers → a `Job`.
 
     job = pudding.solve("…", k=8, models=["deepseek-v4-pro", "qwen3-7-max"])
@@ -45,7 +45,7 @@ def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy
              for seed in range(k)]
     spec = {"problem": problem, "k": k, "model_names": names, "strategy": strategy,
             "max_tokens": max_tokens, "concurrency": concurrency, "timeout": timeout}
-    job = Job(uuid.uuid4().hex[:8], spec, lanes, on_event=on_event)
+    job = Job(uuid.uuid4().hex[:8], spec, lanes, on_event=on_event, sem=sem)
     store.write(job.id, job.to_dict())             # persist as pending so the id is collectable
     try:
         loop = asyncio.get_running_loop()
@@ -54,6 +54,18 @@ def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy
     if loop is not None:
         job._schedule(loop)
     return job
+
+
+def solve_many(problems: list[str], *, k: int = 2, models: list[str] | None = None,
+               strategy: str = "cot", timeout: float | None = None,
+               concurrency: int = DEFAULT_CONCURRENCY, provider: str | None = None) -> list[Job]:
+    """Launch one solve per problem, all sharing ONE rate budget (a single Semaphore sized at the
+    provider's ceiling — NOT N × per-job). Returns the Job handles **immediately** (each scheduled
+    on the running loop); poll `job.summary()` / `job.completed` for non-blocking live feedback —
+    don't await them in the launching cell (STUDIO_PLAN P6). The explore-a-space fan-out."""
+    shared = asyncio.Semaphore(concurrency)
+    return [solve(p, k=k, models=models, strategy=strategy, timeout=timeout,
+                  concurrency=concurrency, provider=provider, sem=shared) for p in problems]
 
 
 def get(job_id: str) -> Job | None:

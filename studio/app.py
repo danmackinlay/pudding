@@ -173,5 +173,63 @@ def _(mo, pin_btn, pudding, reused):
     return
 
 
+@app.cell
+def _(lineup, mo):
+    bproblems = mo.ui.text_area(
+        value=("Find the remainder when 7^999 is divided by 1000.\n"
+               "What is 12*12?\n"
+               "How many positive integers less than 1000 are divisible by neither 5 nor 7?"),
+        rows=4, full_width=True, label="problems (one per line)")
+    bmodels = mo.ui.multiselect(options=sorted(lineup._MAP) or ["deepseek-v4-pro"],
+                                value=["deepseek-v4-pro"], label="models")
+    bk = mo.ui.slider(1, 8, value=2, label="k / problem")
+    run_batch = mo.ui.run_button(label="Run batch")
+    stop_batch = mo.ui.run_button(label="■ stop all")
+    mo.vstack([mo.md("### ▦ Batch — explore a space (parallel, one shared rate budget)"),
+               bproblems, mo.hstack([bmodels, bk], justify="start", gap=2),
+               mo.hstack([run_batch, stop_batch], justify="start", gap=2)])
+    return bk, bmodels, bproblems, run_batch, stop_batch
+
+
+@app.cell
+def _(bk, bmodels, bproblems, mo, pudding, run_batch):
+    # launch-DON'T-await: solve_many returns handles immediately (jobs run on marimo's loop);
+    # the grid below polls them, so this cell never blocks (STUDIO_PLAN P6).
+    mo.stop(not run_batch.value, mo.md("◦ enter problems (one per line), then **Run batch**."))
+    problems = [p.strip() for p in bproblems.value.splitlines() if p.strip()]
+    mo.stop(not problems, mo.md("◦ no problems entered."))
+    batch = pudding.solve_many(problems, k=bk.value, models=list(bmodels.value), timeout=60)
+    mo.md(f"launched **{len(batch)}** problems — the launch did **not** block; live grid below ↓")
+    return (batch,)
+
+
+@app.cell
+def _(batch, mo):
+    _ = batch
+    refresh_grid = mo.ui.refresh(default_interval="1s")     # poll the background jobs each second
+    refresh_grid
+    return (refresh_grid,)
+
+
+@app.cell
+def _(batch, mo, refresh_grid):
+    refresh_grid.value                                      # tick → re-poll live state
+    rows = [j.summary() for j in batch]
+    done = sum(1 for r in rows if r["status"] in ("done", "error", "cancelled"))
+    mo.ui.table(rows, selection=None,
+                label=f"batch — {done}/{len(rows)} complete · drill in by pasting a row's id "
+                      f"into the ♻ Reuse box above")
+    return
+
+
+@app.cell
+def _(batch, mo, stop_batch):
+    mo.stop(not stop_batch.value, mo.md(""))
+    for _j in batch:
+        _j.cancel()                                         # real kill — closes in-flight HTTP
+    mo.md(f"■ stopped {len(batch)} jobs.")
+    return
+
+
 if __name__ == "__main__":
     app.run()

@@ -229,6 +229,21 @@ def test_recent_lists_summaries_newest_first():
     assert s["problem"].startswith("beta") and s["answer"] == "144"
 
 
+def test_solve_many_shares_one_rate_budget_and_summarizes():
+    _use(_fake_solve_one_async)
+
+    async def run():
+        jobs = api.solve_many(["p1", "p2", "p3"], k=2, models=["deepseek-v4-pro"])
+        assert len(jobs) == 3
+        assert jobs[0]._sem is jobs[1]._sem is jobs[2]._sem    # ONE shared budget, not 3×
+        return jobs, [await j for j in jobs]
+
+    jobs, results = asyncio.run(run())
+    assert all(r.answer == "144" for r in results)
+    s = jobs[0].summary()
+    assert s["status"] == "done" and s["done"] == "2/2" and s["answer"] == "144"
+
+
 def test_timeout_caps_each_attempt():
     async def _slow(problem, *, strategy, model, provider, temperature, seed, max_tokens, **kw):
         await asyncio.sleep(30)                            # would hang without the cap

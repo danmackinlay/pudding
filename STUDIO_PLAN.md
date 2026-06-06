@@ -280,6 +280,9 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
   default; pre-flight estimate from `prices.json`.
 - **Does the Phase-B chat shim survive** as the "quick single question" lightweight client, or is it
   subsumed by a one-cell studio? (Lean: keep it; it's a thin library consumer and a good smoke test.)
+- **Run persistence management (P5 follow-up, deferred):** the job/pin store grows unbounded and
+  `recent()` is a full-dir scan. Later we'll want **indexing, sorting, filtering, and deleting** runs
+  (and pins) — a proper browser over an index (ties to the sqlite-vs-dir store question above).
 
 ## 7. File map & non-goals
 
@@ -304,7 +307,8 @@ prover, when it exists, is a reducer swap away on the identical surface. Library
 
 ## 9. Sketched next scopes (P5 = #1 reuse, P6 = #2 batch→grid)
 
-### P5 — id-addressed reuse (the unit is the artifact, not the cell)
+### P5 — id-addressed reuse (the unit is the artifact, not the cell) ✅ BUILT
+*Done: `api.recent`; studio ♻ Reuse section — copy-out (id + artifact), recent dropdown, load-by-id, 📌 pin. Concurrency default 8→16.*
 **Problem.** A marimo cell is ephemeral (recomputed on re-run, gone at session end); the unit of
 maths — a `Result` — must outlive it. Reuse-by-cut-and-paste is clunky and lossy. **The durable unit
 is the id-addressed artifact** (a `job id`, or a content-addressed `pin id`); cells are just lenses.
@@ -324,7 +328,11 @@ is the id-addressed artifact** (a `job id`, or a content-addressed `pin id`); ce
 for copy / recent-dropdown / load-by-id. **Decision:** results are addressed by id; the markdown
 artifact is the interchange; cut-and-paste stays as the human fallback, never the only path.
 
-### P6 — batch → grid (parallel, one view, one rate budget)
+### P6 — batch → grid (parallel, one view, one rate budget) ✅ BUILT
+*Done: `api.solve_many` (one shared Semaphore = global rate budget) returns handles immediately;
+`Job.summary()`/`completed` for poll-based feedback; studio ▦ Batch section = **launch-don't-await**
++ a `mo.ui.refresh` timer polling a live grid + ■ stop-all. Live-verified: launch non-blocking,
+grid fills as background jobs complete. Async feedback without blocking the launching cell.*
 **Problem.** Launching many loops at once is valuable (explore a *space*), but N live boards in
 marimo is unreadable and unmaintainable (the reactive model fights dynamic-N UI; N lifecycles to
 manage). **Do it as one batch op → one grid**, parallelism in the library.

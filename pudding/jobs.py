@@ -147,8 +147,9 @@ def result_from_dict(d: dict) -> Result:
 
 
 # --- the fan-out -----------------------------------------------------------
-async def _collect(problem, lanes, *, max_tokens, concurrency, emit, timeout=None) -> list[Attempt]:
-    sem = asyncio.Semaphore(concurrency)
+async def _collect(problem, lanes, *, max_tokens, concurrency, emit, timeout=None,
+                   sem=None) -> list[Attempt]:
+    sem = sem or asyncio.Semaphore(concurrency)     # shared (batch rate budget) or per-job
 
     async def one(lane: Lane) -> Attempt:
         async with sem:
@@ -192,7 +193,8 @@ class Job:
     Observe: pass on_event=, or `async for e in job.stream()`
     """
 
-    def __init__(self, id: str, spec: dict, lanes: list[Lane] | None = None, on_event=None):
+    def __init__(self, id: str, spec: dict, lanes: list[Lane] | None = None, on_event=None,
+                 sem=None):
         self.id = id
         self.spec = spec
         self.lanes = lanes or []
@@ -202,6 +204,24 @@ class Job:
         self._result: Result | None = None
         self._task: asyncio.Task | None = None
         self._queue: asyncio.Queue | None = None
+        self._sem = sem            # shared rate budget across a batch (solve_many); None = own
+        self._seen = 0             # live completed-attempt counter (for non-blocking grid polling)
+
+    @property
+    def total(self) -> int:
+        return len(self.lanes) or (self.spec.get("k", 0) * len(self.spec.get("model_names", [])))
+
+    @property
+    def completed(self) -> int:
+        return self._seen
+
+    def summary(self) -> dict:
+        """Live, poll-safe snapshot for a non-blocking grid — no need to consume the stream."""
+        r = self._result
+        return {"id": self.id, "problem": (self.spec.get("problem") or "")[:60],
+                "status": self.status, "done": f"{self._seen}/{self.total}",
+                "answer": r.answer if r else None,
+                "agreement": (f"{r.count}/{r.n_answered}" if (r and r.n_answered) else "—")}
 
     # scheduling / awaiting -------------------------------------------------
     def _schedule(self, loop) -> None:
@@ -266,7 +286,7 @@ class Job:
                      for n in self.spec["model_names"] for s in range(start, start + add)]
         new = await _collect(self.spec["problem"], new_lanes, max_tokens=self.spec["max_tokens"],
                              concurrency=self.spec["concurrency"], emit=self._emit,
-                             timeout=self.spec.get("timeout"))
+                             timeout=self.spec.get("timeout"), sem=self._sem)
         self.attempts = sorted(self.attempts + new, key=lambda a: (a.model, a.seed))
         self.spec["k"] = self.spec["k"] + add          # maj@k now reflects the wider sample
         self._result = _reduce(self.attempts, self.spec)
@@ -280,6 +300,8 @@ class Job:
 
     # internals -------------------------------------------------------------
     def _emit(self, event: dict) -> None:
+        if event.get("type") == "attempt":
+            self._seen += 1        # live progress for poll-based (timer) grids — no stream needed
         if self.on_event is not None:
             try:
                 self.on_event(event)
@@ -294,7 +316,7 @@ class Job:
             self.attempts = await _collect(self.spec["problem"], self.lanes,
                                            max_tokens=self.spec["max_tokens"],
                                            concurrency=self.spec["concurrency"], emit=self._emit,
-                                           timeout=self.spec.get("timeout"))
+                                           timeout=self.spec.get("timeout"), sem=self._sem)
             self._result = _reduce(self.attempts, self.spec)
             self.status = "done"
         except asyncio.CancelledError:
