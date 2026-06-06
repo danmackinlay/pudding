@@ -1,12 +1,16 @@
 """pudding studio — the marimo notebook surface (STUDIO_PLAN Phase C, P2).
 
 Write maths, get maths back: paste a problem (markdown + LaTeX), pick models and k, hit Solve;
-many attempts fan out on the backend and the **answer-cluster board** resolves inline. A thin
-reactive shell — all fan-out / clustering / artifacts live in the headless `pudding` library
-(decision #9); this file only wires controls to it and renders the view-model.
+many attempts fan out on the backend and the **answer-cluster board** fills in attempt-by-attempt.
+A thin reactive shell — all fan-out / clustering / artifacts live in the headless `pudding`
+library (decision #9); this file only wires controls to it and renders the view-model.
 
     uv run --extra studio marimo edit studio/app.py      # author / explore (the lab)
     uv run --extra studio marimo run  studio/app.py      # serve as an app
+
+Lifecycle: the runner streams `job.stream()` so progress shows live; a `finally: job.cancel()`
+means marimo's interrupt (■) **and** re-pressing Solve both kill the in-flight fan-out and
+supersede cleanly (the kill closes the HTTP — see pudding.jobs._collect).
 
 Marimo is an OPTIONAL consumer (`pudding[studio]`): it imports pudding, never the reverse.
 """
@@ -19,6 +23,7 @@ app = marimo.App(width="medium")
 
 @app.cell
 def _():
+    import asyncio
     import os
     import sys
 
@@ -38,7 +43,7 @@ def _():
     import pudding
     from pudding import lineup
 
-    return lineup, mo, pudding
+    return asyncio, lineup, mo, pudding
 
 
 @app.cell
@@ -51,50 +56,68 @@ def _(mo):
 
 
 @app.cell
+def _(mo, pudding):
+    def board(*, progress=None, total=None, result=None):
+        """The answer-cluster board: a live progress list while attempts land, then the voted
+        answer + cluster table + per-attempt transcripts. Pure render over pudding's view-model."""
+        if result is not None:
+            vm = pudding.view_model(result)
+            blocks = [mo.md(pudding.render(result))]      # headline · agreement · footer (or error)
+            if len(vm["clusters"]) > 1:
+                blocks.append(mo.ui.table(
+                    [{"answer": c["answer"], "votes": c["count"], "models": ", ".join(c["models"])}
+                     for c in vm["clusters"]], selection=None, label="answer clusters"))
+            blocks += [mo.md("#### the working"), mo.accordion({
+                f"{a['model']} #{a['seed']} → {a['boxed'] if a['boxed'] is not None else '∅'}":
+                    mo.md(a["transcript"] or a["error"] or "*(empty)*")
+                for a in vm["attempts"]})]
+            return mo.vstack(blocks)
+        prog = progress or []
+        rows = "\n".join(
+            f"- `{e['lane']}` #{e['seed']} → "
+            + (f"**{e['boxed']}**" if e.get("boxed") is not None
+               else (f"_{e['error']}_" if e.get("error") else "∅"))
+            for e in prog) or "*starting…*"
+        return mo.vstack([mo.md(f"running… **{len(prog)}/{total}** samples"), mo.md(rows)])
+
+    return (board,)
+
+
+@app.cell
 def _(lineup, mo):
     known = sorted(lineup._MAP) or ["deepseek-v4-pro"]
-    default = [m for m in ("deepseek-v4-pro", "qwen3-7-max") if m in known] or known[:1]
+    default = ["deepseek-v4-pro"] if "deepseek-v4-pro" in known else known[:1]
     example = "Find the remainder when 7^999 is divided by 1000."  # template from samples.jsonl (answer 143)
-    problem = mo.ui.text_area(value=example, placeholder="Paste a problem (markdown + LaTeX)…", rows=4, full_width=True)
+    problem = mo.ui.text_area(value=example, placeholder="Paste a problem (markdown + LaTeX)…",
+                              rows=4, full_width=True)
     models = mo.ui.multiselect(options=known, value=default, label="models")
-    k = mo.ui.slider(1, 12, value=5, label="k (samples / model)")
+    k = mo.ui.slider(1, 12, value=2, label="k (samples / model)")
     run = mo.ui.run_button(label="Solve")
     mo.vstack([problem, mo.hstack([models, k], justify="start", gap=2), run])
     return k, models, problem, run
 
 
 @app.cell
-async def _(k, mo, models, problem, pudding, run):
-    # The run button gates the expensive fan-out so editing controls doesn't re-solve.
-    mo.stop(not run.value, mo.md("*paste a problem, choose models + k, then press **Solve***"))
-    mo.stop(not problem.value.strip(), mo.md("*enter a problem first*"))
-    with mo.status.spinner(title=f"running {len(models.value)} × {k.value} samples…"):
-        job = pudding.solve(problem.value, k=k.value, models=list(models.value))
-        result = await job          # marimo supports top-level await
-    return (result,)
-
-
-@app.cell
-def _(mo, pudding, result):
-    vm = pudding.view_model(result)
-    if vm["answer"] is None:
-        head = "### No answer — the samples produced no boxed result."
-    else:
-        head = (f"### \\({vm['answer']}\\)  ·  agreement {vm['agreement']}"
-                + (" · **cross-model ✓**" if vm["cross_model"] else ""))
-    cost = f" · ~${vm['cost']:.4f}" if vm["cost"] is not None else ""
-    footer = mo.md(f"<small>— maj@{vm['k']} · {', '.join(vm['models'])} · {vm['tokens']} tok{cost}</small>")
-    clusters = mo.ui.table(
-        [{"answer": c["answer"], "votes": c["count"], "models": ", ".join(c["models"])}
-         for c in vm["clusters"]],
-        selection=None, label="answer clusters",
-    )
-    transcripts = mo.accordion({
-        f"{a['model']} #{a['seed']} → {a['boxed'] if a['boxed'] is not None else '∅'}":
-            mo.md(a["transcript"] or a["error"] or "*(empty)*")
-        for a in vm["attempts"]
-    })
-    mo.vstack([mo.md(head), clusters, footer, mo.md("#### the working"), transcripts])
+async def _(asyncio, board, k, mo, models, problem, pudding, run):
+    mo.stop(not run.value,
+            mo.md("◦ press **Solve** to fan out — interrupt (■) or press Solve again to restart."))
+    mo.stop(not problem.value.strip(), mo.md("◦ enter a problem first."))
+    total = len(models.value) * k.value
+    attempts = []
+    job = pudding.solve(problem.value, k=k.value, models=list(models.value))
+    try:
+        async for ev in job.stream():
+            if ev.get("type") == "attempt":
+                attempts.append(ev)
+                mo.output.replace(board(progress=attempts, total=total))
+        result = await job
+        mo.output.replace(board(result=result))
+    except asyncio.CancelledError:
+        mo.output.replace(mo.md(f"⏹ **stopped** — {len(attempts)}/{total} samples."))
+        raise
+    finally:
+        if job.status not in ("done", "error"):
+            job.cancel()     # marimo interrupt / Solve re-press → kill the in-flight fan-out
     return
 
 

@@ -148,6 +148,41 @@ def test_widen_adds_samples_and_reclusters():
     assert "maj@4" in r2.markdown
 
 
+def test_cancel_stops_inflight_fanout():
+    # The kill-switch must cancel the CHILD tasks (close in-flight HTTP), not just orphan them.
+    state = {"started": 0, "cancelled": 0, "finished": 0}
+
+    async def _slow(problem, *, strategy, model, provider, temperature, seed, max_tokens, **kw):
+        state["started"] += 1
+        try:
+            await asyncio.sleep(30)
+        except asyncio.CancelledError:
+            state["cancelled"] += 1
+            raise
+        state["finished"] += 1
+        return {"boxed": "1", "transcript": "", "completion_tokens": 0, "truncated": False,
+                "ttft_s": None, "decode_tok_s": None, "error": None}
+
+    jobs.solve_one_async = _slow
+
+    async def run():
+        job = api.solve("q", k=4, models=["deepseek-v4-pro"])
+        await asyncio.sleep(0.05)                       # let the children start
+        assert state["started"] >= 1
+        job.cancel()
+        try:
+            await asyncio.wait_for(job, timeout=2)      # must return fast, not after sleep(30)
+        except asyncio.CancelledError:
+            pass
+        await asyncio.sleep(0.05)
+        return job
+
+    job = asyncio.run(run())
+    assert job.status == "cancelled"
+    assert state["finished"] == 0                       # nothing completed
+    assert state["cancelled"] >= 1                      # children were actually cancelled (no orphan)
+
+
 def test_view_model_and_html():
     _use(_fake_solve_one_async)
     res = api.solve("q", k=2, models=["deepseek-v4-pro", "kimi-k2-6"]).result()

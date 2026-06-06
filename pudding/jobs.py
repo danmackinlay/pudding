@@ -163,7 +163,15 @@ async def _collect(problem, lanes, *, max_tokens, concurrency, emit) -> list[Att
         return att
 
     tasks = [asyncio.create_task(one(l)) for l in lanes]
-    out = [await fut for fut in asyncio.as_completed(tasks)]
+    out = []
+    try:
+        for fut in asyncio.as_completed(tasks):
+            out.append(await fut)
+    except asyncio.CancelledError:
+        for t in tasks:                            # cancel propagates to children → close in-flight HTTP
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
     out.sort(key=lambda a: (a.model, a.seed))     # stable order, independent of completion order
     return out
 
@@ -191,6 +199,8 @@ class Job:
     # scheduling / awaiting -------------------------------------------------
     def _schedule(self, loop) -> None:
         if self._task is None and self._result is None:
+            if self._queue is None:
+                self._queue = asyncio.Queue()      # capture events from the first emit — no race
             self._task = loop.create_task(self._run())
             self.status = "running"
 
