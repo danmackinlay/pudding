@@ -54,8 +54,8 @@ def _(mo):
 def _(lineup, mo):
     known = sorted(lineup._MAP) or ["deepseek-v4-pro"]
     default = [m for m in ("deepseek-v4-pro", "qwen3-7-max") if m in known] or known[:1]
-    problem = mo.ui.text_area(placeholder="Paste a problem (markdown + LaTeX)…",
-                              rows=4, full_width=True)
+    example = "Find the remainder when 7^999 is divided by 1000."  # template from samples.jsonl (answer 143)
+    problem = mo.ui.text_area(value=example, placeholder="Paste a problem (markdown + LaTeX)…", rows=4, full_width=True)
     models = mo.ui.multiselect(options=known, value=default, label="models")
     k = mo.ui.slider(1, 12, value=5, label="k (samples / model)")
     run = mo.ui.run_button(label="Solve")
