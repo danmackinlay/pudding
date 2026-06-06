@@ -11,6 +11,7 @@ import json
 import uuid
 
 from . import lineup, store
+from .discovery import Flock, conjecture_async, discover_async, falsify_async
 from .jobs import Job, Lane, Result, result_from_dict, result_to_dict
 
 DEFAULT_MAX_TOKENS = 16384         # thinking shares the budget; a stingy cap empties \boxed{}
@@ -66,6 +67,33 @@ def solve_many(problems: list[str], *, k: int = 2, models: list[str] | None = No
     shared = asyncio.Semaphore(concurrency)
     return [solve(p, k=k, models=models, strategy=strategy, timeout=timeout,
                   concurrency=concurrency, provider=provider, sem=shared) for p in problems]
+
+
+# --- the generative loop (P3): AI proposes, the oracle disposes, you curate ----
+async def conjecture(context: str, *, n: int = 8, models: list[str] | None = None,
+                     provider: str | None = None, temperature: float = 0.8,
+                     on_event=None) -> Flock:
+    """Propose `n` falsifiable conjectures from `context` (a selection, a corpus, raw data) →
+    a `Flock` of `proposed` claims, each carrying a `counterexample()` harness. Run `falsify`
+    next. Async (quick): `await pudding.conjecture(...)`, or `asyncio.run(...)` headless."""
+    return await conjecture_async(context, n=n, models=models, provider=provider,
+                                  temperature=temperature, on_event=on_event)
+
+
+async def falsify(flock: Flock, *, timeout: float = 8.0, concurrency: int = 8,
+                  on_event=None) -> Flock:
+    """Run each conjecture's harness through the cheap oracle in parallel → the flock thinned
+    (`refuted` / `survives` / `error`). The `flock.survivors` are the candidates worth proving —
+    feed `s.statement` to `solve("Prove or disprove: …")`. **Surviving ≠ proven.**"""
+    return await falsify_async(flock, timeout=timeout, concurrency=concurrency, on_event=on_event)
+
+
+async def discover(context: str, *, n: int = 8, models: list[str] | None = None,
+                   provider: str | None = None, timeout: float = 8.0, concurrency: int = 8,
+                   on_event=None) -> Flock:
+    """conjecture → falsify in one call → a flock whose `.survivors` survived the oracle."""
+    return await discover_async(context, n=n, models=models, provider=provider, timeout=timeout,
+                                concurrency=concurrency, on_event=on_event)
 
 
 def get(job_id: str) -> Job | None:

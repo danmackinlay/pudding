@@ -253,9 +253,19 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
   drill-in** (#3), honest **error** rendering + a `timeout=` cap (#4), leaner default (deepseek, k=2).
   **Remaining:** the add-more (`widen`) / cost-dial controls as buttons, and copy-out/`pin` + cell↔job
   binding → folded into P5 (#1). **DoD:** write/paste a problem, run it, watch the fleet resolve, copy out.
-- **P3 — the generative loop.** `conjecture` (AI gen from selection/corpus/data) + `falsify`
-  (Kernel oracle, parallel) + the thinning-flock widget + survivors→`solve` fan-out. **DoD:** from a
-  context, generate hypotheses, auto-cull the false ones cheaply, surface candidates worth proving.
+- **P3 — the generative loop. ✅ BUILT** (`pudding/discovery.py`). `conjecture` (an LLM proposes n
+  falsifiable claims from a context, each shipping a Python `counterexample()` harness, provenance-
+  tagged) + `falsify` (each harness runs in an **isolated subprocess oracle** — genuinely parallel,
+  real timeout/kill, crash-isolated, sympy/numpy from the venv — → `refuted`+witness / `survives` /
+  `error`) + `discover` (the chain). Two honesty rails: **the oracle decides, not the prose**, and
+  **surviving ≠ proven** (a survivor is *not refuted by the search* = a candidate worth proving). The
+  flock markdown + `flock_view_model` are the library's static view (decision #9); the studio **✨
+  Discover** section shows the flock thinning live then routes a chosen survivor into the `solve`
+  fan-out (`"Prove or disprove: …"`). Tolerant JSON parse with **per-object salvage** (a truncated
+  reasoning-model array still yields its complete conjectures). 9 offline tests (oracle run for real);
+  live: deepseek proposed 4 NT claims → oracle refuted 3 (n²+n+41 @40, Σprimes @3, p²−1∣48 @5) and
+  survived 1 (n⁴+4ⁿ composite). **DoD met:** from a context, generate hypotheses, auto-cull the false
+  ones cheaply, surface candidates worth proving.
 - **P4 — the prover drop-in (gated on `PLAN.md` §5/Phase C prover).** `prove` → Lean Pass@k fan-out,
   the **proof-gallery** reducer, same job/widget. **DoD:** a verified-proof gallery for a statement.
 
@@ -287,9 +297,10 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
 ## 7. File map & non-goals
 
 - **New** `pudding/` (or top-level): `jobs.py` (Job/Attempt/store + the multiplex), `api.py` (the
-  verbs), `artifacts.py` (canonical markdown ⇄ sidecar + `pin`/`render` adapters), `store.py` —
-  **zero frontend deps.** `studio/` — the marimo app + live widgets, installed via `pudding[studio]`,
-  importing `pudding` (never the reverse).
+  verbs), `artifacts.py` (canonical markdown ⇄ sidecar + `pin`/`render` adapters), `discovery.py`
+  (the generative loop: `conjecture`/`falsify`/`discover` + the subprocess oracle + flock view),
+  `store.py` — **zero frontend deps.** `studio/` — the marimo app + live widgets, installed via
+  `pudding[studio]`, importing `pudding` (never the reverse).
 - **Reuse unchanged:** `solver_loop`, `strategies`, `eval`, `providers`, `contenders.jsonl`,
   `streaming`, `fanout`, `shim._render_pieces`/`prices.json`.
 - **Non-goals (Phase C):** the Lean prover itself (gated, Phase D); multi-user/hosted SaaS &

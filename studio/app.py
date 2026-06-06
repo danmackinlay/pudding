@@ -231,5 +231,108 @@ def _(batch, mo, stop_batch):
     return
 
 
+@app.cell
+def _(lineup, mo):
+    dcontext = mo.ui.text_area(
+        value=("Elementary number theory over the integers. Look for closed forms, divisibility "
+               "patterns, and primality claims — propose precise, testable statements."),
+        rows=3, full_width=True, label="context (a selection, a corpus, or raw data)")
+    dmodels = mo.ui.multiselect(options=sorted(lineup._MAP) or ["deepseek-v4-pro"],
+                                value=["deepseek-v4-pro"], label="models")
+    dn = mo.ui.slider(2, 12, value=6, label="n (conjectures)")
+    gen_btn = mo.ui.run_button(label="✨ Discover (conjecture → falsify)")
+    mo.vstack([mo.md("### ✨ Discover — AI proposes, the cheap oracle disposes, you curate"),
+               dcontext, mo.hstack([dmodels, dn], justify="start", gap=2), gen_btn])
+    return dcontext, dmodels, dn, gen_btn
+
+
+@app.cell(hide_code=True)
+def _(mo, pudding):
+    def flock_board(flock=None, *, proposing=None):
+        """The flock: live 'proposing…' then the thinned table + survivors + harness drill-in.
+        The oracle's verdict (not the prose) decides; **surviving ≠ proven**. Pure render."""
+        if flock is None:
+            rows = proposing or []
+            body = "\n".join(f"- `{r['id']}` ({r['origin']}) {r['statement']}" for r in rows)
+            return mo.vstack([mo.md(f"proposing… **{len(rows)}** conjectures"),
+                              mo.md(body or "*proposing…*")])
+        vm = pudding.flock_view_model(flock)
+        blocks = [mo.md(vm["markdown"]),
+                  mo.accordion({"📋 copy flock (markdown)": mo.md(f"```\n{vm['markdown']}\n```")}),
+                  mo.ui.table([{"id": c["id"], "status": c["badge"], "conjecture": c["statement"],
+                                "witness / why": c["witness"] or c["detail"], "by": c["origin"]}
+                               for c in vm["conjectures"]], selection=None, label="the flock")]
+        blocks += [mo.md("#### the harnesses — the oracle runs these; the prose doesn't decide"),
+                   mo.accordion({
+                       f"{c['id']} {c['badge']} — {c['statement'][:60]}":
+                           mo.md((f"*{c['rationale']}*\n\n" if c["rationale"] else "")
+                                 + f"```python\n{c['check'] or '(no harness)'}\n```")
+                       for c in vm["conjectures"]})]
+        return mo.vstack(blocks)
+
+    return (flock_board,)
+
+
+@app.cell
+async def _(dcontext, dmodels, dn, flock_board, gen_btn, mo, pudding):
+    mo.stop(not gen_btn.value, mo.md("◦ set a context and press **Discover** — generate "
+            "falsifiable conjectures, then cull the false ones for ~free before spending solve."))
+    mo.stop(not dcontext.value.strip(), mo.md("◦ enter a context first."))
+    _state = {"proposed": [], "verdicts": {}}
+
+    def _sink(e):                                       # opt-in liveness → show the flock thinning
+        if e.get("type") == "conjecture":
+            _state["proposed"].append({"id": e["id"], "origin": e["origin"],
+                                       "statement": e["statement"]})
+            mo.output.replace(flock_board(proposing=_state["proposed"]))
+        elif e.get("type") == "verdict":
+            _state["verdicts"][e["id"]] = e["status"]
+            _surv = sum(1 for s in _state["verdicts"].values() if s == "survives")
+            _ref = sum(1 for s in _state["verdicts"].values() if s == "refuted")
+            mo.output.replace(mo.md(f"falsifying… **{len(_state['verdicts'])}/"
+                                    f"{len(_state['proposed'])}** checked · {_surv} survive · "
+                                    f"{_ref} refuted"))
+
+    flock = await pudding.discover(dcontext.value, n=dn.value, models=list(dmodels.value),
+                                   timeout=8, on_event=_sink)
+    mo.output.replace(flock_board(flock))
+    return (flock,)
+
+
+@app.cell
+def _(flock, mo):
+    survs = flock.survivors
+    prove_pick = mo.ui.dropdown(
+        options={f"{s.id}: {s.statement[:70]}": s.id for s in survs} or {"(no survivors)": ""},
+        label="a survivor to put to the solver")
+    prove_btn = mo.ui.run_button(label="⊢ Prove or disprove (fan out the solver)")
+    mo.vstack([mo.md("#### survivors → the expensive fan-out  ·  *survived ≠ proven*"),
+               mo.hstack([prove_pick, prove_btn], justify="start", gap=2)])
+    return prove_btn, prove_pick
+
+
+@app.cell
+async def _(asyncio, board, flock, mo, prove_btn, prove_pick, pudding):
+    mo.stop(not prove_btn.value, mo.md("◦ pick a survivor, then **Prove or disprove**."))
+    sel = next((s for s in flock.survivors if s.id == prove_pick.value), None)
+    mo.stop(sel is None, mo.md("◦ no survivor selected."))
+    pjob = pudding.solve(f"Prove or disprove, with rigorous justification: {sel.statement}",
+                         k=2, models=flock.models, timeout=90)
+    pattempts = []
+    try:
+        async for pev in pjob.stream():
+            if pev.get("type") == "attempt":
+                pattempts.append(pev)
+                mo.output.replace(board(progress=pattempts, total=pjob.total))
+        mo.output.replace(board(result=await pjob, job_id=pjob.id))
+    except asyncio.CancelledError:
+        mo.output.replace(mo.md(f"⏹ **stopped** — {len(pattempts)}/{pjob.total} samples."))
+        raise
+    finally:
+        if pjob.status not in ("done", "error"):
+            pjob.cancel()
+    return
+
+
 if __name__ == "__main__":
     app.run()
