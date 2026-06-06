@@ -248,9 +248,11 @@ proven  = pudding.prove(alive)           # gated; same Job/widget
   run-button → `pudding.solve` → the inline **answer-cluster board** (cluster table + cross-model
   flag + footer) and per-attempt transcript drill-in, over `view_model` (thin shell, decision #9).
   Builds headless; **interactive run is the user's to drive** (`uv run --extra studio marimo run
-  studio/app.py`). **Remaining:** live stream-fill via `job.stream()`, the cost dial / kill-switch /
-  add-more (`widen`) controls, copy-out + `pin`, and binding cells to job ids for detach/reload.
-  **DoD:** write/paste a problem, run it, watch the fleet resolve *in your document*, copy the result out.
+  studio/app.py`). **Done since:** live **stream-fill** (`job.stream()`), a real **kill-switch**
+  (marimo interrupt / Solve-re-press → `job.cancel()`, library cancels children), **CoT in the
+  drill-in** (#3), honest **error** rendering + a `timeout=` cap (#4), leaner default (deepseek, k=2).
+  **Remaining:** the add-more (`widen`) / cost-dial controls as buttons, and copy-out/`pin` + cell↔job
+  binding → folded into P5 (#1). **DoD:** write/paste a problem, run it, watch the fleet resolve, copy out.
 - **P3 — the generative loop.** `conjecture` (AI gen from selection/corpus/data) + `falsify`
   (Kernel oracle, parallel) + the thinning-flock widget + survivors→`solve` fan-out. **DoD:** from a
   context, generate hypotheses, auto-cull the false ones cheaply, surface candidates worth proving.
@@ -299,3 +301,49 @@ notebook (an opt-in `pudding[studio]` consumer) lets you write/paste
 maths, fan out many attempts on the cloud, watch the answer-distribution instrument resolve *inside
 your document*, copy the result into a paper, and run a generate→falsify→solve discovery loop. The
 prover, when it exists, is a reducer swap away on the identical surface. Library and app, one engine.
+
+## 9. Sketched next scopes (P5 = #1 reuse, P6 = #2 batch→grid)
+
+### P5 — id-addressed reuse (the unit is the artifact, not the cell)
+**Problem.** A marimo cell is ephemeral (recomputed on re-run, gone at session end); the unit of
+maths — a `Result` — must outlive it. Reuse-by-cut-and-paste is clunky and lossy. **The durable unit
+is the id-addressed artifact** (a `job id`, or a content-addressed `pin id`); cells are just lenses.
+
+**Build (all studio + thin library, no engine change):**
+1. **Copy-out (cheap, do first).** A one-click "copy" on a result — render `render(result)` in a
+   fenced block + a `mo.ui` copy button. Makes the human path (into a paper) frictionless.
+2. **Recent-results browser.** Library: `recent(n) -> [{id, problem, answer, agreement, created}]`
+   (project summaries from the job store; the store already has `list_ids()`). Studio: a dropdown of
+   recent runs → load → render its board. So "use last session's output" = pick it, not re-run it.
+3. **Load-by-id.** A text input → `pudding.get(id)` / `get_pin(id)` → board. Pair with the id shown
+   prominently on every result (so it's copyable across sessions/machines).
+4. **Feed-forward (the generative seam).** Insert a pinned artifact as *context* for the next
+   `solve`/`conjecture` (e.g. "given this verified lemma: …"). This is where #1 meets P3.
+
+**Contracts:** `store.summaries()` (or `recent`) reading the job dir; `api.recent(n)`; studio cells
+for copy / recent-dropdown / load-by-id. **Decision:** results are addressed by id; the markdown
+artifact is the interchange; cut-and-paste stays as the human fallback, never the only path.
+
+### P6 — batch → grid (parallel, one view, one rate budget)
+**Problem.** Launching many loops at once is valuable (explore a *space*), but N live boards in
+marimo is unreadable and unmaintainable (the reactive model fights dynamic-N UI; N lifecycles to
+manage). **Do it as one batch op → one grid**, parallelism in the library.
+
+**Build:**
+1. **Global rate budget (load-bearing, do first).** Today each `Job` has its own `Semaphore(8)`; N
+   jobs × k would blow the provider rate limit. Thread a **shared** semaphore into `_collect`
+   (`sem=`) so total in-flight provider calls ≤ one cap across the whole batch.
+2. **`solve_many(problems, *, models, k, timeout, concurrency)`** → a set of `Job`s under the shared
+   cap → a grid view-model (`to_grid`): row = problem (× model optional), cols = voted · agreement ·
+   $ · time; drill-in = that cell's full board. Prompt sources: a pasted list, a benchmark slice
+   (`eval.load_data`), or a **parametric template** (`"Is {n}²+1 prime?"` over `n=2..20` — the
+   exploration killer-case). Persist the set as a *sweep* id (reuses P5's store).
+3. **Studio grid.** One cell: source control + run → `mo.ui.table(to_grid(...))`, row-select →
+   drill-in board. Not N boards.
+
+**Contracts:** `_collect(sem=)`; `api.solve_many(...) -> [Job]` + `artifacts.to_grid(results)`;
+studio table+drill-in. **Maintainability rule:** parallelism lives in the library (one batch op +
+one shared rate cap); marimo renders one grid. Modal stays out (rented generalists are rate-limit
+bound — local asyncio is the ceiling; §2).
+
+Sequencing: P5 first (it also closes P2's copy-out/binding remainder and feeds P3); P6 next.
