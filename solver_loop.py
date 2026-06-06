@@ -266,7 +266,7 @@ async def solve_one_async(problem: str, *, strategy: str = "tir_fence", model: s
     ttft_s, decode_tok_s, error}. Generalist rungs run native-async (AsyncOpenAI); tir_fence
     runs its blocking-kernel loop in a worker thread. The async audition (eval.py) drives this."""
     base = {"boxed": None, "transcript": "", "completion_tokens": 0, "truncated": False,
-            "elapsed_s": 0.0, "ttft_s": None, "decode_tok_s": None, "error": None}
+            "elapsed_s": 0.0, "ttft_s": None, "decode_tok_s": None, "error": None, "thinking": ""}
     if strategy in ("cot", "self_verify", "tools"):
         from strategies import generalist_stream
         async for evt in generalist_stream(problem, strategy=strategy, provider=provider,
@@ -274,6 +274,7 @@ async def solve_one_async(problem: str, *, strategy: str = "tir_fence", model: s
                                             seed=seed, max_tokens=max_tokens):
             if evt["type"] == "final_answer":
                 base.update(boxed=evt.get("boxed"), transcript=evt.get("transcript", ""),
+                            thinking=evt.get("reasoning") or "",       # the model's hidden CoT
                             completion_tokens=evt.get("completion_tokens") or 0,
                             truncated=bool(evt.get("truncated")),
                             elapsed_s=evt.get("elapsed_s") or 0.0,

@@ -69,7 +69,8 @@ def _(mo, pudding):
                      for c in vm["clusters"]], selection=None, label="answer clusters"))
             blocks += [mo.md("#### the working"), mo.accordion({
                 f"{a['model']} #{a['seed']} → {a['boxed'] if a['boxed'] is not None else '∅'}":
-                    mo.md(a["transcript"] or a["error"] or "*(empty)*")
+                    mo.md(((a["thinking"] + "\n\n---\n") if a.get("thinking") else "")
+                          + (a["transcript"] or a["error"] or "*(empty)*"))
                 for a in vm["attempts"]})]
             return mo.vstack(blocks)
         prog = progress or []
@@ -104,7 +105,7 @@ async def _(asyncio, board, k, mo, models, problem, pudding, run):
     mo.stop(not problem.value.strip(), mo.md("◦ enter a problem first."))
     total = len(models.value) * k.value
     attempts = []
-    job = pudding.solve(problem.value, k=k.value, models=list(models.value))
+    job = pudding.solve(problem.value, k=k.value, models=list(models.value), timeout=60)
     try:
         async for ev in job.stream():
             if ev.get("type") == "attempt":

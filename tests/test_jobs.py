@@ -194,6 +194,44 @@ def test_view_model_and_html():
     assert "144" in html and "<table>" in html and "<details>" in html
 
 
+def test_thinking_captured_per_attempt():
+    async def _think(problem, *, strategy, model, provider, temperature, seed, max_tokens, **kw):
+        return {"boxed": "9", "transcript": "answer 9", "thinking": "first add the parts…",
+                "completion_tokens": 50, "truncated": False, "ttft_s": 0.1, "decode_tok_s": 1.0,
+                "error": None}
+    _use(_think)
+    res = api.solve("q", k=2, models=["deepseek-v4-pro"]).result()
+    assert all(a.thinking == "first add the parts…" for a in res.attempts)   # the CoT is kept
+    assert all(at["thinking"] for at in pudding.view_model(res)["attempts"])
+
+
+def test_all_errored_headline_is_honest():
+    async def _err(problem, *, strategy, model, provider, temperature, seed, max_tokens, **kw):
+        return {"boxed": None, "transcript": "", "thinking": "", "completion_tokens": 0,
+                "truncated": False, "ttft_s": None, "decode_tok_s": None,
+                "error": "APIConnectionError: Connection error."}
+    _use(_err)
+    res = api.solve("q", k=2, models=["deepseek-v4-pro"]).result()
+    assert res.answer is None
+    md = res.markdown
+    assert "failed" in md and "errored" in md and "Connection error" in md   # not a bland "No answer"
+
+
+def test_timeout_caps_each_attempt():
+    async def _slow(problem, *, strategy, model, provider, temperature, seed, max_tokens, **kw):
+        await asyncio.sleep(30)                            # would hang without the cap
+        return {"boxed": "1", "transcript": "", "thinking": "", "completion_tokens": 0,
+                "truncated": False, "ttft_s": None, "decode_tok_s": None, "error": None}
+    _use(_slow)
+
+    async def run():
+        return await api.solve("q", k=2, models=["deepseek-v4-pro"], timeout=0.2)
+
+    res = asyncio.run(asyncio.wait_for(run(), timeout=3))   # must be fast, not 30s
+    assert res.answer is None
+    assert all("timeout" in (a.error or "") for a in res.attempts)
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

@@ -20,11 +20,15 @@ DEFAULT_MODELS = lineup.default_models()
 
 def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy: str = "cot",
           max_tokens: int | None = None, concurrency: int = DEFAULT_CONCURRENCY,
-          backend: str = "local", provider: str | None = None, on_event=None) -> Job:
+          timeout: float | None = None, backend: str = "local", provider: str | None = None,
+          on_event=None) -> Job:
     """Fan out k seeded samples per model, vote + cluster the answers → a `Job`.
 
     job = pudding.solve("…", k=8, models=["deepseek-v4-pro", "qwen3-7-max"])
     result = await job        # async      |   result = pudding.solve("…").result()   # sync
+
+    `timeout` is a per-attempt wall-clock cap (seconds) — set it for interactive use so a
+    network/engine stall fails fast instead of hanging on the HTTP-layer timeout.
     """
     if backend != "local":
         raise NotImplementedError("backend='modal' is deferred to the prover (STUDIO_PLAN §2)")
@@ -38,7 +42,7 @@ def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy
              for prov, model_id in [lineup.resolve(name, provider)]
              for seed in range(k)]
     spec = {"problem": problem, "k": k, "model_names": names, "strategy": strategy,
-            "max_tokens": max_tokens, "concurrency": concurrency}
+            "max_tokens": max_tokens, "concurrency": concurrency, "timeout": timeout}
     job = Job(uuid.uuid4().hex[:8], spec, lanes, on_event=on_event)
     store.write(job.id, job.to_dict())             # persist as pending so the id is collectable
     try:

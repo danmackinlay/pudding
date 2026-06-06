@@ -46,7 +46,14 @@ def to_markdown(result) -> str:
     """Canonical markdown: the voted answer + agreement (cross-model flagged), the cluster
     distribution when there's dissent, and a maj@k · tokens · est-$ footer."""
     if result.answer is None:
-        head = "**No answer** — the samples produced no boxed result."
+        errs = [a.error for a in result.attempts if a.error]
+        if errs and len(errs) == result.n_total:        # outage / engine failure, not "unsolved"
+            head = f"**failed** — all {result.n_total} samples errored: `{errs[0]}`"
+        elif errs:
+            head = (f"**No answer** — {result.n_answered}/{result.n_total} answered; "
+                    f"{len(errs)} errored (`{errs[0]}`)")
+        else:
+            head = "**No answer** — the samples produced no boxed result."
     else:
         cross = " · cross-model ✓" if result.cross_model else ""
         head = f"**${result.answer}$**  ·  agreement {result.count}/{result.n_answered}{cross}"
@@ -91,7 +98,8 @@ def view_model(result) -> dict:
         "clusters": [{"answer": c.answer, "count": c.count, "models": list(c.models)}
                      for c in result.clusters],
         "attempts": [{"model": a.model, "seed": a.seed, "boxed": a.boxed, "tokens": a.tokens,
-                      "error": a.error, "transcript": a.transcript} for a in result.attempts],
+                      "error": a.error, "transcript": a.transcript,
+                      "thinking": getattr(a, "thinking", "")} for a in result.attempts],
     }
 
 
@@ -112,5 +120,6 @@ def to_html(result) -> str:
     details = "".join(
         f"<details><summary>{a['model']} #{a['seed']} → "
         f"{a['boxed'] if a['boxed'] is not None else '∅'}</summary>"
-        f"<pre>{a['transcript'] or a['error'] or ''}</pre></details>" for a in vm["attempts"])
+        f"<pre>{(a.get('thinking') + chr(10) + '---' + chr(10) if a.get('thinking') else '')}"
+        f"{a['transcript'] or a['error'] or ''}</pre></details>" for a in vm["attempts"])
     return f"<div class='pudding-board'>{head}{table}{foot}{details}</div>"

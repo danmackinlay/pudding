@@ -120,6 +120,7 @@ async def cot_stream(problem, *, client, model, temperature, seed, max_tokens) -
             info = payload
     boxed = extract_boxed(info.get("text", "")) or extract_boxed(info.get("reasoning", ""))
     yield ev("final_answer", boxed=boxed, transcript=info.get("text") or info.get("reasoning", ""),
+             reasoning=info.get("reasoning", ""),          # the hidden CoT — kept for the drill-in
              elapsed_s=round(time.perf_counter() - t0, 2),
              completion_tokens=info.get("completion_tokens") or 0,
              truncated=info.get("finish_reason") == "length",
@@ -163,6 +164,7 @@ async def self_verify_stream(problem, *, client, model, temperature, seed, max_t
              {"ttft_s": v.get("ttft_s"), "gen_s": v.get("gen_s"), "tok": v.get("completion_tokens")}]
     yield ev("final_answer", boxed=boxed, candidate_boxed=candidate_boxed,
              transcript=f"{candidate}\n\n--- verification ---\n{v.get('text') or v.get('reasoning', '')}",
+             reasoning="\n\n---\n".join(r for r in (c.get("reasoning"), v.get("reasoning")) if r),
              elapsed_s=round(time.perf_counter() - t0, 2), completion_tokens=ctoks,
              truncated="length" in (c.get("finish_reason"), v.get("finish_reason")),
              ttft_s=c.get("ttft_s"), decode_tok_s=v.get("decode_tok_s"), calls=calls)

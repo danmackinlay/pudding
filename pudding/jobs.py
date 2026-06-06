@@ -47,6 +47,7 @@ class Attempt:
     decode_tok_s: float | None
     truncated: bool
     error: str | None
+    thinking: str = ""     # the model's hidden CoT (reasoning_content), kept for the drill-in
 
 
 @dataclass
@@ -146,19 +147,25 @@ def result_from_dict(d: dict) -> Result:
 
 
 # --- the fan-out -----------------------------------------------------------
-async def _collect(problem, lanes, *, max_tokens, concurrency, emit) -> list[Attempt]:
+async def _collect(problem, lanes, *, max_tokens, concurrency, emit, timeout=None) -> list[Attempt]:
     sem = asyncio.Semaphore(concurrency)
 
     async def one(lane: Lane) -> Attempt:
         async with sem:
-            r = await solve_one_async(problem, strategy=lane.strategy, model=lane.model,
-                                      provider=lane.provider, temperature=lane.temperature,
-                                      seed=lane.seed, max_tokens=max_tokens)
+            coro = solve_one_async(problem, strategy=lane.strategy, model=lane.model,
+                                   provider=lane.provider, temperature=lane.temperature,
+                                   seed=lane.seed, max_tokens=max_tokens)
+            try:
+                r = await (asyncio.wait_for(coro, timeout) if timeout else coro)
+            except asyncio.TimeoutError:        # interactive cap — fail fast under connectivity strife
+                r = {"boxed": None, "transcript": "", "completion_tokens": 0, "truncated": False,
+                     "ttft_s": None, "decode_tok_s": None, "thinking": "",
+                     "error": f"timeout ({timeout:g}s)"}
         att = Attempt(model=lane.name, provider=lane.provider, model_id=lane.model, seed=lane.seed,
                       boxed=r.get("boxed"), transcript=r.get("transcript", ""),
                       tokens=r.get("completion_tokens") or 0, ttft_s=r.get("ttft_s"),
                       decode_tok_s=r.get("decode_tok_s"), truncated=bool(r.get("truncated")),
-                      error=r.get("error"))
+                      error=r.get("error"), thinking=r.get("thinking") or "")
         emit(ev("attempt", lane=att.model, seed=att.seed, boxed=att.boxed, error=att.error))
         return att
 
@@ -258,7 +265,8 @@ class Job:
                           seed=s, temperature=0.6)
                      for n in self.spec["model_names"] for s in range(start, start + add)]
         new = await _collect(self.spec["problem"], new_lanes, max_tokens=self.spec["max_tokens"],
-                             concurrency=self.spec["concurrency"], emit=self._emit)
+                             concurrency=self.spec["concurrency"], emit=self._emit,
+                             timeout=self.spec.get("timeout"))
         self.attempts = sorted(self.attempts + new, key=lambda a: (a.model, a.seed))
         self.spec["k"] = self.spec["k"] + add          # maj@k now reflects the wider sample
         self._result = _reduce(self.attempts, self.spec)
@@ -285,7 +293,8 @@ class Job:
         try:
             self.attempts = await _collect(self.spec["problem"], self.lanes,
                                            max_tokens=self.spec["max_tokens"],
-                                           concurrency=self.spec["concurrency"], emit=self._emit)
+                                           concurrency=self.spec["concurrency"], emit=self._emit,
+                                           timeout=self.spec.get("timeout"))
             self._result = _reduce(self.attempts, self.spec)
             self.status = "done"
         except asyncio.CancelledError:

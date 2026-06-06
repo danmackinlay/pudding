@@ -140,6 +140,7 @@ def test_thinking_trace_surfaces_as_thinking_delta():
     content = "".join(e["text"] for e in evts if e["type"] == "reasoning_delta")
     assert "I should add" in thinking and "I should add" not in content
     assert "\\boxed{8}" in content
+    assert "I should add" in (_final(evts).get("reasoning") or "")   # kept for the drill-in
 
 
 # --- dispatch (solve_one_async) --------------------------------------------
