@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "skills": {
+    "anywidget-generator": {
+      "source": "marimo-team/skills",
+      "sourceType": "github",
+      "skillPath": "skills/anywidget/SKILL.md",
+      "computedHash": "93a512dc9870809902459881640b041afe5fe460774e9b49a212d8d799922ab5"
+    },
+    "jupyter-to-marimo": {
+      "source": "marimo-team/skills",
+      "sourceType": "github",
+      "skillPath": "skills/jupyter-to-marimo/SKILL.md",
+      "computedHash": "08a26b09bb992d3056fe8fe30bf29cd11b89dd1539f8bb298b8d85ca728b15c2"
+    },
+    "marimo-batch": {
+      "source": "marimo-team/skills",
+      "sourceType": "github",
+      "skillPath": "skills/marimo-batch/SKILL.md",
+      "computedHash": "8af0436514aac6a0317733cb0897adc08026a22e82c5beb1ed92eb4bba7e5f4f"
+    },
+    "marimo-notebook": {
+      "source": "marimo-team/skills",
+      "sourceType": "github",
+      "skillPath": "skills/marimo-notebook/SKILL.md",
+      "computedHash": "56c73bca1669181c2e0c970f2276e119960b6c68d7301fd66fe33107142a89e3"
+    },
+    "marimo-pair": {
+      "source": "marimo-team/marimo-pair",
+      "sourceType": "github",
+      "skillPath": "skills/marimo-pair/SKILL.md",
+      "computedHash": "d2b0a585d449096a985e1fe20a6a6fff4991ab3004a7757b1d5a03cfa8bd28ea"
+    }
+  }
+}
