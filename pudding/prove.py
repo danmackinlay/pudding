@@ -55,6 +55,31 @@ def extract_proof(text: str) -> str | None:
     return m[-1] if m else None
 
 
+# --- anti-laundering: the model must prove the statement we PASTED, not a weaker rewrite -----
+# The generalist emits a whole file, so it could silently alter the theorem (drop a hypothesis,
+# weaken a bound) and prove that instead — a green ✓ on the wrong statement, the exact failure this
+# track refuses. Q1 guard: the theorem *signature* we handed over must appear verbatim (whitespace-
+# normalised) in the candidate. (The richer faithfulness gate — numeric / back-translation / negation
+# — is Q3; this only enforces "prove THIS formal statement, unchanged".)
+def _normspace(s: str) -> str:
+    return "".join(s.split())        # drop ALL whitespace — robust to reformatting, still catches
+                                     # a dropped hypothesis / changed bound / renamed theorem
+
+
+def _signature(statement: str) -> str:
+    """The theorem signature: from `theorem`/`lemma`/`example` up to the proof assignment `:=`."""
+    head = statement.split(":=", 1)[0]
+    for kw in ("theorem ", "lemma ", "example "):
+        i = head.find(kw)
+        if i != -1:
+            return _normspace(head[i:])
+    return _normspace(head)
+
+
+def _preserves_signature(statement: str, proof: str) -> bool:
+    return _signature(statement) in _normspace(proof)
+
+
 def _retry_user(errors: list) -> str:
     lines = "\n".join(str(e.get("data") or e.get("text") or e) for e in (errors or [])[:8])
     return ("The Lean compiler REJECTED that proof:\n\n" + lines +
@@ -132,6 +157,14 @@ async def prove_one_async(statement: str, *, model: str | None = None, provider:
                 msgs += [{"role": "assistant", "content": text},
                          {"role": "user", "content": "Output the complete Lean 4 proof in a "
                                                       "single ```lean4 code block."}]
+                continue
+
+            if not _preserves_signature(statement, proof):    # anti-laundering: prove the ORIGINAL,
+                last_errors = [{"data": "the candidate altered the theorem statement; the signature "
+                                        "must match the one given, exactly"}]
+                msgs += [{"role": "assistant", "content": text},
+                         {"role": "user", "content": _retry_user(last_errors) +
+                          " Keep the `theorem` signature EXACTLY as given; change only the proof."}]
                 continue
 
             # The model is asked to include imports; if it dropped them, prepend the std header.
