@@ -115,23 +115,41 @@ def get(job_id: str) -> Job | None:
     return Job.from_dict(d) if d else None
 
 
-def recent(n: int = 10) -> list[dict]:
-    """Recent runs as summaries (newest first) — the reuse browser's source. Reads the job store;
-    each row: {id, problem, answer, agreement, status, created}. The id is the durable handle
-    (reload with `get`); the artifact, not the cell, is the unit of work (STUDIO_PLAN P5)."""
-    out = []
-    for jid in store.list_ids():
-        d = store.read(jid)
-        if not d:
+_SORT_KEYS = {"created", "tokens", "answer", "status", "problem"}
+
+
+def recent(n: int = 10, *, status: str | None = None, query: str | None = None,
+           sort: str = "created", desc: bool = True) -> list[dict]:
+    """Recent runs as summaries — the run-management browser's source (SOLVER_UX_PLAN P7). Reads
+    the O(index) cache (no full-dir rescan), then filters/sorts in memory. Each row:
+    {id, problem, answer, agreement, status, created, tokens, cost, k, models}.
+
+    `status` keeps only that status (done/error/cancelled/running/pending); `query` is a
+    case-insensitive substring over the problem; `sort` ∈ {created,tokens,answer,status,problem}.
+    The id is the durable handle (reload with `get`, drop with `delete`)."""
+    q = (query or "").lower().strip()
+    rows = []
+    for s in store.summaries():
+        if status and s.get("status") != status:
             continue
-        r = d.get("result") or {}
-        prov = r.get("provenance") or {}
-        out.append({"id": jid,
-                    "problem": (prov.get("problem") or d.get("spec", {}).get("problem") or "")[:70],
-                    "answer": r.get("answer"), "agreement": f"{r.get('count', 0)}/{r.get('n_answered', 0)}",
-                    "status": d.get("status"), "created": prov.get("created") or 0.0})
-    out.sort(key=lambda s: s["created"], reverse=True)
-    return out[:n]
+        problem = s.get("problem") or ""
+        if q and q not in problem.lower():
+            continue
+        rows.append({"id": s.get("id"), "problem": problem, "answer": s.get("answer"),
+                     "agreement": f"{s.get('count', 0)}/{s.get('n_answered', 0)}",
+                     "status": s.get("status"), "created": s.get("created") or 0.0,
+                     "tokens": s.get("tokens", 0), "cost": s.get("cost"),
+                     "k": s.get("k"), "models": s.get("models") or []})
+    key = sort if sort in _SORT_KEYS else "created"
+    numeric = key in ("created", "tokens")
+    rows.sort(key=lambda r: (r.get(key) or 0) if numeric else str(r.get(key) or ""), reverse=desc)
+    return rows[:n] if n else rows
+
+
+def delete(run_id: str) -> bool:
+    """Forget a run: remove its stored file and its index entry. Returns True if anything was
+    removed. (Pins are content-addressed frozen artifacts and are not touched here.)"""
+    return store.delete(run_id)
 
 
 def _content_id(result: Result) -> str:

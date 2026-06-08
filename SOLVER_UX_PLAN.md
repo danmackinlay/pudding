@@ -36,13 +36,16 @@ violate the `FORK.md` contract.**
 
 ## 3. Build order (each is additive; ship + commit independently)
 
-- **P7 — run-management browser (the deferred STUDIO_PLAN §6 item; do first — it's the most-felt gap).**
-  Today `recent()` is a full-dir scan + parse of every job file; the store grows unbounded; there's
-  no sort/filter/delete. Add a lightweight **index** (a `results/index.jsonl` manifest updated on
-  `store.write`, or a sqlite `results/index.db` — see the §6 store question) so listing is O(index),
-  and library verbs `recent(filter=…, sort=…)` + `delete(id)` / `forget(id)`. Studio: a sortable,
-  filterable, deletable table of runs (replace/augment the ♻ Reuse dropdown). **DoD:** browse, sort,
-  filter, and delete past runs without a full-dir rescan; deletes are reflected live.
+- **P7 — run-management browser. ✅ BUILT.** *Resolved the §4 store question in favour of a **JSON
+  index cache** (not sqlite): per-run files stay the source of truth; `store.write` upserts a sibling
+  `<jobs>-index.json`; `recent()` lists in O(index) with no full-dir rescan; `store.reindex()`
+  self-heals (and `summaries()` heals on first use); `store.delete(id)` drops file + index entry.
+  `api.recent(n, *, status, query, sort, desc)` + `api.delete(id)` (exported). Studio ♻ section
+  replaced the dropdown with a sortable/searchable `mo.ui.table` + status/query filters + delete-by-id
+  that re-lists live (the table depends on a `last_delete` token — no reactive cycle); click a row to
+  load. 70 tests green (4 new: delete forgets file+index; recent filter/query; index lists without
+  rescan; reindex heals a missing index). sqlite stays a future swap behind the same functions if
+  scale demands. **DoD met.**
 - **P8 — feed-forward (the generative seam; STUDIO_PLAN P5 #4, where this track meets discovery).**
   Insert a pinned `Result` (or a `Flock` survivor) as **context** for the next `solve`/`conjecture`
   ("given this verified result: …"). A thin library helper (`as_context(result|conjecture) -> str`

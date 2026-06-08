@@ -267,6 +267,10 @@ async def solve_one_async(problem: str, *, strategy: str = "tir_fence", model: s
     runs its blocking-kernel loop in a worker thread. The async audition (eval.py) drives this."""
     base = {"boxed": None, "transcript": "", "completion_tokens": 0, "truncated": False,
             "elapsed_s": 0.0, "ttft_s": None, "decode_tok_s": None, "error": None, "thinking": ""}
+    if strategy == "prove":                    # Track 2 prover engine (the reducer+engine swap on
+        from pudding.prove import prove_one_async   # the identical Job; see PROVER_PLAN.md / FORK.md).
+        return await prove_one_async(problem, model=model, provider=provider,   # inert until the
+                                     temperature=temperature, seed=seed, max_tokens=max_tokens)  # fork adds pudding/prove.py
     if strategy in ("cot", "self_verify", "tools"):
         from strategies import generalist_stream
         async for evt in generalist_stream(problem, strategy=strategy, provider=provider,

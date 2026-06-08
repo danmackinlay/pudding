@@ -92,6 +92,9 @@ def _cluster_key(boxed: str | None):
 
 
 def _reduce(attempts: list[Attempt], spec: dict) -> Result:
+    if spec.get("strategy") == "prove":         # Track 2 reducer swap: Pass@k = first/shortest that
+        from pudding.prove import reduce_proofs  # compiles (the compiler is unfakeable). PROVER_PLAN.md;
+        return reduce_proofs(attempts, spec)     # inert until the fork adds pudding/prove.py.
     answered = [a for a in attempts if _cluster_key(a.boxed) is not None]
     by_key: dict[str, list[Attempt]] = {}
     for a in answered:

@@ -7,9 +7,56 @@ in studio/.
 """
 import json
 import os
+import re
 from pathlib import Path
 
 from streaming import normalize_delimiters
+
+# An answer may be a number ("143"), a math expr ("\frac{3}{56}"), LaTeX prose ("\text{true}"), or
+# plain prose ("the statement is true"). MathJax surfaces (mo.md) render the first three when wrapped
+# in $…$, but $plain prose$ comes out as ugly italic math — so wrap ONLY when the answer is math-y.
+# Plain-text surfaces (table cells, dropdowns) can't render LaTeX at all → `answer_text` cleans it.
+_MATHY = re.compile(r"[\\^_={}]")
+_TEX_WRAP = re.compile(r"\\(?:text|mathrm|mathbf|mathit|operatorname|boxed)\s*\{([^{}]*)\}")
+
+
+def _is_number(s: str) -> bool:
+    try:
+        float(str(s).replace(",", "").strip())
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
+def _is_mathy(s: str) -> bool:
+    s = s or ""
+    return _is_number(s) or bool(_MATHY.search(s))
+
+
+def _answer_md(s) -> str:
+    """Render an answer for a MathJax markdown surface: $…$ if math-y, else plain prose."""
+    s = "" if s is None else str(s)
+    return f"${s}$" if _is_mathy(s) else s
+
+
+def _answer_html(s) -> str:
+    s = "" if s is None else str(s)
+    if _is_mathy(s):
+        return f"\\({s}\\)"
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def answer_text(s) -> str:
+    """A plain-text rendering of a boxed answer for non-MathJax surfaces (table cells, dropdowns):
+    unwrap \\text{}/\\boxed{} etc., drop $ delimiters, collapse whitespace. Best-effort — residual
+    math (e.g. \\frac{…}) is left as-is; the full LaTeX still renders in the markdown board."""
+    s = "" if s is None else str(s)
+    prev = None
+    while prev != s:                       # unwrap nested \text{…}/\boxed{…} a few passes
+        prev = s
+        s = _TEX_WRAP.sub(r"\1", s)
+    s = s.replace("$", "").replace("\\,", " ").replace("\\ ", " ")
+    return re.sub(r"\s+", " ", s).strip() or "∅"
 
 _PRICES_PATH = Path(os.environ.get(
     "WORKBENCH_PRICES", Path(__file__).resolve().parent.parent / "prices.json"))
@@ -56,12 +103,12 @@ def to_markdown(result) -> str:
             head = "**No answer** — the samples produced no boxed result."
     else:
         cross = " · cross-model ✓" if result.cross_model else ""
-        head = f"**${result.answer}$**  ·  agreement {result.count}/{result.n_answered}{cross}"
+        head = f"**{_answer_md(result.answer)}**  ·  agreement {result.count}/{result.n_answered}{cross}"
     lines = [head, ""]
     if len(result.clusters) > 1:
         lines.append("distribution:")
         for c in result.clusters:
-            lines.append(f"- ${c.answer}$ ×{c.count}  ({', '.join(c.models)})")
+            lines.append(f"- {_answer_md(c.answer)} ×{c.count}  ({', '.join(c.models)})")
         lines.append("")
     lines.append(_footer(result))
     return "\n".join(lines)
@@ -115,9 +162,9 @@ def to_html(result) -> str:
     vm = view_model(result)
     head = ("<p><b>No answer</b> — the samples produced no boxed result.</p>"
             if vm["answer"] is None else
-            f"<p><b>\\({vm['answer']}\\)</b> · agreement {vm['agreement']}"
+            f"<p><b>{_answer_html(vm['answer'])}</b> · agreement {vm['agreement']}"
             f"{' · cross-model ✓' if vm['cross_model'] else ''}</p>")
-    rows = "".join(f"<tr><td>\\({c['answer']}\\)</td><td>{c['count']}</td>"
+    rows = "".join(f"<tr><td>{_answer_html(c['answer'])}</td><td>{c['count']}</td>"
                    f"<td>{', '.join(c['models'])}</td></tr>" for c in vm["clusters"])
     table = (f"<table><thead><tr><th>answer</th><th>votes</th><th>models</th></tr></thead>"
              f"<tbody>{rows}</tbody></table>" if vm["clusters"] else "")

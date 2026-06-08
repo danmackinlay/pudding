@@ -68,10 +68,16 @@ def _(mo, pudding):
                                          f"pin `{vm['pin']}`" if vm.get("pin") else ""] if s)
             if ids:
                 blocks.append(mo.md(f"<small>{ids}</small>"))
-            blocks.append(mo.accordion({"📋 copy artifact (markdown)": mo.md(f"```\n{md}\n```")}))
-            if len(vm["clusters"]) > 1:
+            copy = {"📋 copy artifact (markdown)": mo.md(f"```\n{md}\n```")}
+            if job_id:                                    # a bare-id fence → marimo's hover copy button
+                copy["🔗 copy job id"] = mo.md(f"```text\n{job_id}\n```")
+            if vm.get("pin"):
+                copy["🔗 copy pin id"] = mo.md(f"```text\n{vm['pin']}\n```")
+            blocks.append(mo.accordion(copy))
+            if len(vm["clusters"]) > 1:                   # table cells are plain text → clean LaTeX
                 blocks.append(mo.ui.table(
-                    [{"answer": c["answer"], "votes": c["count"], "models": ", ".join(c["models"])}
+                    [{"answer": pudding.answer_text(c["answer"]), "votes": c["count"],
+                      "models": ", ".join(c["models"])}
                      for c in vm["clusters"]], selection=None, label="answer clusters"))
             blocks += [mo.md("#### the working"), mo.accordion({
                 f"{a['model']} #{a['seed']} → {a['boxed'] if a['boxed'] is not None else '∅'}":
@@ -87,7 +93,25 @@ def _(mo, pudding):
             for e in prog) or "*starting…*"
         return mo.vstack([mo.md(f"running… **{len(prog)}/{total}** samples"), mo.md(rows)])
 
-    return (board,)
+    def ago(ts):
+        """Human-readable recency for the run list ('just now' / '5m ago' / 'yesterday' / 'Jun 07')."""
+        import time
+        if not ts:
+            return "—"
+        d = max(0.0, time.time() - ts)
+        if d < 45:
+            return "just now"
+        if d < 3600:
+            return f"{int(d / 60)}m ago"
+        if d < 86400:
+            return f"{int(d / 3600)}h ago"
+        if d < 2 * 86400:
+            return "yesterday"
+        if d < 7 * 86400:
+            return f"{int(d / 86400)}d ago"
+        return time.strftime("%b %d", time.localtime(ts))
+
+    return ago, board
 
 
 @app.cell
@@ -130,50 +154,96 @@ async def _(asyncio, board, k, mo, models, problem, pudding, run):
 
 @app.cell(hide_code=True)
 def _(mo):
+    get_runs_ver, set_runs_ver = mo.state(0)           # bumped on delete → the table re-lists live
+    return get_runs_ver, set_runs_ver
+
+
+@app.cell(hide_code=True)
+def _(mo):
+    # ♻ Reuse & manage runs (P7): browse/sort/filter/delete the store; the durable unit is the id.
     refresh = mo.ui.run_button(label="↻ refresh")
-    return (refresh,)
-
-
-@app.cell(hide_code=True)
-def _(mo, pudding, refresh):
-    _ = refresh.value                                  # re-read the list when refresh is clicked
-    runs = pudding.recent(20)                          # newest runs from the job store (any session)
-    options = {f"{(s['answer'] or '∅')} · {s['problem']}  [{s['id']}]": s["id"] for s in runs}
-    pick = mo.ui.dropdown(options=options or {"(no past runs yet)": ""}, label="recent runs")
+    runs_status = mo.ui.dropdown(options=["all", "done", "error", "cancelled", "running", "pending"],
+                                 value="all", label="status")
+    runs_query = mo.ui.text(placeholder="search problems…", label="filter")
     by_id = mo.ui.text(placeholder="…or paste a job / pin id", label="load by id")
-    mo.vstack([mo.md("### ♻ Reuse a past run — the durable unit is the id, not the cell"),
-               mo.hstack([pick, refresh], justify="start", gap=2), by_id])
-    return by_id, pick
+    del_btn = mo.ui.run_button(label="🗑 delete selected")
+    mo.vstack([mo.md("### ♻ Reuse & manage runs — the durable unit is the id, not the cell"),
+               mo.hstack([runs_status, runs_query, refresh], justify="start", gap=2),
+               mo.hstack([by_id, del_btn], justify="start", gap=2)])
+    return by_id, del_btn, refresh, runs_query, runs_status
 
 
 @app.cell(hide_code=True)
-def _(board, by_id, mo, pick, pudding):
-    rid = (by_id.value or "").strip() or pick.value
-    mo.stop(not rid, mo.md("◦ pick a recent run or paste an id to reuse it."))
-    loaded_job = pudding.get(rid)                      # a Job…
-    reused = loaded_job._result if (loaded_job and loaded_job._result) else pudding.get_pin(rid)  # …or a pin
-    mo.stop(reused is None, mo.md(f"◦ no run found for `{rid}`."))
-    board(result=reused, job_id=rid)                   # the loaded board (copy-out + id inside)
+def _(ago, get_runs_ver, mo, pudding, refresh, runs_query, runs_status):
+    _ = (refresh.value, get_runs_ver())                # re-list on refresh OR after a delete
+    _status = None if runs_status.value == "all" else runs_status.value
+    _runs = pudding.recent(200, status=_status, query=runs_query.value or None)
+    _rows = [{"id": r["id"], "when": ago(r["created"]), "problem": r["problem"],
+              "answer": pudding.answer_text(r["answer"]), "agree": r["agreement"],
+              "status": r["status"], "k": r["k"], "models": ", ".join(r["models"]),
+              "tok": r["tokens"]} for r in _runs]
+    runs_table = mo.ui.table(_rows, selection="multi", page_size=8,
+                             label=f"{len(_rows)} run(s) · check rows to load / delete · "
+                                   "sort/search in-table")
+    # display the element itself (NOT via output.replace) so selection round-trips to the loader.
+    runs_table if _rows else mo.md("*(no runs match — solve something, or clear the filter)*")
+    return (runs_table,)
+
+
+@app.cell(hide_code=True)
+def _(del_btn, mo, pudding, runs_table, set_runs_ver):
+    # Delete the CHECKED rows. mo.state breaks the reactive cycle: this cell reads the table's
+    # selection + the button and WRITES the version (functional update, so it doesn't read it);
+    # the table above reads the version and re-lists. del_btn is a one-shot, so no delete loop.
+    _out = mo.md("◦ check rows above, then **🗑 delete selected**.")
+    if del_btn.value:
+        _ids = [r["id"] for r in (runs_table.value or [])]
+        if _ids:
+            _n = sum(1 for i in _ids if pudding.delete(i))
+            set_runs_ver(lambda v: v + 1)              # functional update → no dependency on the version
+            _out = mo.md(f"🗑 deleted **{_n}** run(s).")
+        else:
+            _out = mo.md("◦ no rows checked — nothing deleted.")
+    _out
+    return
+
+
+@app.cell(hide_code=True)
+def _(board, by_id, mo, pudding, runs_table):
+    # Always DEFINE `reused` (None when nothing is chosen) — never mo.stop, so the pin cells below
+    # don't show a scary "ancestor was stopped" message; just render a hint instead.
+    _sel = runs_table.value
+    rid = (by_id.value or "").strip() or (_sel[0]["id"] if _sel else "")
+    if not rid:
+        reused = None
+        _out = mo.md("◦ check a row above (loads the first), or paste an id, to load a run.")
+    else:
+        _job = pudding.get(rid)                        # a Job… or a pin
+        reused = _job._result if (_job and _job._result) else pudding.get_pin(rid)
+        _out = (board(result=reused, job_id=rid) if reused is not None
+                else mo.md(f"◦ no run found for `{rid}`."))
+    _out
     return (reused,)
 
 
 @app.cell(hide_code=True)
 def _(mo, reused):
-    _ = reused                                         # only show pin once a result is loaded
     pin_btn = mo.ui.run_button(label="📌 pin → citable id")
-    pin_btn
+    pin_btn if reused is not None else mo.md("")       # only offer pin once a result is loaded
     return (pin_btn,)
 
 
 @app.cell(hide_code=True)
 def _(mo, pin_btn, pudding, reused):
-    mo.stop(not pin_btn.value, mo.md(""))
-    pinned = pudding.pin(reused)
-    mo.md(f"📌 pinned as `{pinned.pin}` — frozen + reproducible; reload with this id.")
+    _out = mo.md("")
+    if reused is not None and pin_btn.value:
+        _pinned = pudding.pin(reused)
+        _out = mo.md(f"📌 pinned as `{_pinned.pin}` — frozen + reproducible; reload with this id.")
+    _out
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(lineup, mo):
     bproblems = mo.ui.text_area(
         value=("Find the remainder when 7^999 is divided by 1000.\n"
@@ -194,12 +264,16 @@ def _(lineup, mo):
 @app.cell
 def _(bk, bmodels, bproblems, mo, pudding, run_batch):
     # launch-DON'T-await: solve_many returns handles immediately (jobs run on marimo's loop);
-    # the grid below polls them, so this cell never blocks (STUDIO_PLAN P6).
-    mo.stop(not run_batch.value, mo.md("◦ enter problems (one per line), then **Run batch**."))
-    problems = [p.strip() for p in bproblems.value.splitlines() if p.strip()]
-    mo.stop(not problems, mo.md("◦ no problems entered."))
-    batch = pudding.solve_many(problems, k=bk.value, models=list(bmodels.value), timeout=60)
-    mo.md(f"launched **{len(batch)}** problems — the launch did **not** block; live grid below ↓")
+    # the grid below polls them, so this cell never blocks (STUDIO_PLAN P6). Always DEFINE `batch`
+    # (empty until launched) so the grid cells below never show "ancestor was stopped".
+    _problems = [p.strip() for p in bproblems.value.splitlines() if p.strip()]
+    if run_batch.value and _problems:
+        batch = pudding.solve_many(_problems, k=bk.value, models=list(bmodels.value), timeout=60)
+        _out = mo.md(f"launched **{len(batch)}** problems — the launch did **not** block; grid below ↓")
+    else:
+        batch = []
+        _out = mo.md("◦ enter problems (one per line), then **Run batch**.")
+    _out
     return (batch,)
 
 
@@ -211,7 +285,7 @@ def _(batch, mo):
     return (refresh_grid,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(batch, mo, refresh_grid):
     refresh_grid.value                                      # tick → re-poll live state
     rows = [j.summary() for j in batch]
@@ -222,7 +296,7 @@ def _(batch, mo, refresh_grid):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(batch, mo, stop_batch):
     mo.stop(not stop_batch.value, mo.md(""))
     for _j in batch:
@@ -231,7 +305,7 @@ def _(batch, mo, stop_batch):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(lineup, mo):
     dcontext = mo.ui.text_area(
         value=("Elementary number theory over the integers. Look for closed forms, divisibility "
@@ -259,7 +333,8 @@ def _(mo, pudding):
         vm = pudding.flock_view_model(flock)
         blocks = [mo.md(vm["markdown"]),
                   mo.accordion({"📋 copy flock (markdown)": mo.md(f"```\n{vm['markdown']}\n```")}),
-                  mo.ui.table([{"id": c["id"], "status": c["badge"], "conjecture": c["statement"],
+                  mo.ui.table([{"id": c["id"], "status": c["badge"],          # plain-text cells →
+                                "conjecture": pudding.answer_text(c["statement"]),  # clean the LaTeX
                                 "witness / why": c["witness"] or c["detail"], "by": c["origin"]}
                                for c in vm["conjectures"]], selection=None, label="the flock")]
         blocks += [mo.md("#### the harnesses — the oracle runs these; the prose doesn't decide"),
@@ -273,37 +348,43 @@ def _(mo, pudding):
     return (flock_board,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 async def _(dcontext, dmodels, dn, flock_board, gen_btn, mo, pudding):
-    mo.stop(not gen_btn.value, mo.md("◦ set a context and press **Discover** — generate "
-            "falsifiable conjectures, then cull the false ones for ~free before spending solve."))
-    mo.stop(not dcontext.value.strip(), mo.md("◦ enter a context first."))
-    _state = {"proposed": [], "verdicts": {}}
+    # Always DEFINE `flock` (None until run) so the prove cells below never show "ancestor stopped".
+    flock = None
+    if not gen_btn.value:
+        mo.output.replace(mo.md("◦ set a context and press **Discover** — generate falsifiable "
+                                "conjectures, then cull the false ones for ~free before solve."))
+    elif not dcontext.value.strip():
+        mo.output.replace(mo.md("◦ enter a context first."))
+    else:
+        _state = {"proposed": [], "verdicts": {}}
 
-    def _sink(e):                                       # opt-in liveness → show the flock thinning
-        if e.get("type") == "conjecture":
-            _state["proposed"].append({"id": e["id"], "origin": e["origin"],
-                                       "statement": e["statement"]})
-            mo.output.replace(flock_board(proposing=_state["proposed"]))
-        elif e.get("type") == "verdict":
-            _state["verdicts"][e["id"]] = e["status"]
-            _surv = sum(1 for s in _state["verdicts"].values() if s == "survives")
-            _ref = sum(1 for s in _state["verdicts"].values() if s == "refuted")
-            mo.output.replace(mo.md(f"falsifying… **{len(_state['verdicts'])}/"
-                                    f"{len(_state['proposed'])}** checked · {_surv} survive · "
-                                    f"{_ref} refuted"))
+        def _sink(e):                                   # opt-in liveness → show the flock thinning
+            if e.get("type") == "conjecture":
+                _state["proposed"].append({"id": e["id"], "origin": e["origin"],
+                                           "statement": e["statement"]})
+                mo.output.replace(flock_board(proposing=_state["proposed"]))
+            elif e.get("type") == "verdict":
+                _state["verdicts"][e["id"]] = e["status"]
+                _surv = sum(1 for s in _state["verdicts"].values() if s == "survives")
+                _ref = sum(1 for s in _state["verdicts"].values() if s == "refuted")
+                mo.output.replace(mo.md(f"falsifying… **{len(_state['verdicts'])}/"
+                                        f"{len(_state['proposed'])}** checked · {_surv} survive · "
+                                        f"{_ref} refuted"))
 
-    flock = await pudding.discover(dcontext.value, n=dn.value, models=list(dmodels.value),
-                                   timeout=8, on_event=_sink)
-    mo.output.replace(flock_board(flock))
+        flock = await pudding.discover(dcontext.value, n=dn.value, models=list(dmodels.value),
+                                       timeout=8, on_event=_sink)
+        mo.output.replace(flock_board(flock))
     return (flock,)
 
 
-@app.cell
-def _(flock, mo):
-    survs = flock.survivors
-    prove_pick = mo.ui.dropdown(
-        options={f"{s.id}: {s.statement[:70]}": s.id for s in survs} or {"(no survivors)": ""},
+@app.cell(hide_code=True)
+def _(flock, mo, pudding):
+    _survs = flock.survivors if flock else []          # flock is None until Discover runs
+    prove_pick = mo.ui.dropdown(                        # dropdown labels are plain text → clean LaTeX
+        options={f"{s.id}: {pudding.answer_text(s.statement)[:70]}": s.id for s in _survs}
+                or {"(no survivors yet)": ""},
         label="a survivor to put to the solver")
     prove_btn = mo.ui.run_button(label="⊢ Prove or disprove (fan out the solver)")
     mo.vstack([mo.md("#### survivors → the expensive fan-out  ·  *survived ≠ proven*"),
@@ -311,9 +392,9 @@ def _(flock, mo):
     return prove_btn, prove_pick
 
 
-@app.cell
+@app.cell(hide_code=True)
 async def _(asyncio, board, flock, mo, prove_btn, prove_pick, pudding):
-    mo.stop(not prove_btn.value, mo.md("◦ pick a survivor, then **Prove or disprove**."))
+    mo.stop(not (flock and prove_btn.value), mo.md("◦ pick a survivor, then **Prove or disprove**."))
     sel = next((s for s in flock.survivors if s.id == prove_pick.value), None)
     mo.stop(sel is None, mo.md("◦ no survivor selected."))
     pjob = pudding.solve(f"Prove or disprove, with rigorous justification: {sel.statement}",
