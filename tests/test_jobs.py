@@ -334,6 +334,18 @@ def test_reindex_heals_a_missing_index():
     assert store._INDEX.exists()
 
 
+def test_answer_rendering_math_vs_prose_and_plaintext():
+    # Non-numeric/verbal answers (e.g. "Prove or disprove" verdicts) must render sanely: math-y
+    # answers wrap in $…$ for MathJax, prose stays plain (no ugly italics), and table cells get a
+    # LaTeX-stripped plain-text form.
+    from pudding.artifacts import _answer_md, answer_text
+    assert _answer_md("143") == "$143$"                          # a number → math
+    assert _answer_md("\\frac{1}{2}") == "$\\frac{1}{2}$"        # a math expr → math
+    assert _answer_md("the statement is true") == "the statement is true"   # prose → NOT $-wrapped
+    assert answer_text("\\text{The statement is true.}") == "The statement is true."  # cleaned
+    assert answer_text("\\boxed{144}") == "144" and answer_text(None) == "∅"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

@@ -14,10 +14,11 @@ reconnect with ``pudding.get(id)``. Interactivity is opt-in (``on_event`` / ``jo
 """
 from .api import (DEFAULT_MODELS, conjecture, delete, discover, falsify, get, get_pin, pin,
                   recent, solve, solve_many)
-from .artifacts import render, to_html, view_model
+from .artifacts import answer_text, render, to_html, view_model
 from .discovery import Conjecture, Flock, flock_view_model
 from .jobs import Attempt, Cluster, Job, Result
 
 __all__ = ["solve", "solve_many", "get", "recent", "delete", "pin", "get_pin", "render",
-           "view_model", "to_html", "Job", "Result", "Attempt", "Cluster", "DEFAULT_MODELS",
-           "conjecture", "falsify", "discover", "Conjecture", "Flock", "flock_view_model"]
+           "view_model", "to_html", "answer_text", "Job", "Result", "Attempt", "Cluster",
+           "DEFAULT_MODELS", "conjecture", "falsify", "discover", "Conjecture", "Flock",
+           "flock_view_model"]

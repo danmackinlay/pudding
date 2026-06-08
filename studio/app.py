@@ -74,9 +74,10 @@ def _(mo, pudding):
             if vm.get("pin"):
                 copy["🔗 copy pin id"] = mo.md(f"```text\n{vm['pin']}\n```")
             blocks.append(mo.accordion(copy))
-            if len(vm["clusters"]) > 1:
+            if len(vm["clusters"]) > 1:                   # table cells are plain text → clean LaTeX
                 blocks.append(mo.ui.table(
-                    [{"answer": c["answer"], "votes": c["count"], "models": ", ".join(c["models"])}
+                    [{"answer": pudding.answer_text(c["answer"]), "votes": c["count"],
+                      "models": ", ".join(c["models"])}
                      for c in vm["clusters"]], selection=None, label="answer clusters"))
             blocks += [mo.md("#### the working"), mo.accordion({
                 f"{a['model']} #{a['seed']} → {a['boxed'] if a['boxed'] is not None else '∅'}":
@@ -178,8 +179,9 @@ def _(ago, get_runs_ver, mo, pudding, refresh, runs_query, runs_status):
     _status = None if runs_status.value == "all" else runs_status.value
     _runs = pudding.recent(200, status=_status, query=runs_query.value or None)
     _rows = [{"id": r["id"], "when": ago(r["created"]), "problem": r["problem"],
-              "answer": r["answer"] or "∅", "agree": r["agreement"], "status": r["status"],
-              "k": r["k"], "models": ", ".join(r["models"]), "tok": r["tokens"]} for r in _runs]
+              "answer": pudding.answer_text(r["answer"]), "agree": r["agreement"],
+              "status": r["status"], "k": r["k"], "models": ", ".join(r["models"]),
+              "tok": r["tokens"]} for r in _runs]
     runs_table = mo.ui.table(_rows, selection="multi", page_size=8,
                              label=f"{len(_rows)} run(s) · check rows to load / delete · "
                                    "sort/search in-table")
@@ -241,7 +243,7 @@ def _(mo, pin_btn, pudding, reused):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(lineup, mo):
     bproblems = mo.ui.text_area(
         value=("Find the remainder when 7^999 is divided by 1000.\n"
@@ -283,7 +285,7 @@ def _(batch, mo):
     return (refresh_grid,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(batch, mo, refresh_grid):
     refresh_grid.value                                      # tick → re-poll live state
     rows = [j.summary() for j in batch]
@@ -294,7 +296,7 @@ def _(batch, mo, refresh_grid):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(batch, mo, stop_batch):
     mo.stop(not stop_batch.value, mo.md(""))
     for _j in batch:
@@ -303,7 +305,7 @@ def _(batch, mo, stop_batch):
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(lineup, mo):
     dcontext = mo.ui.text_area(
         value=("Elementary number theory over the integers. Look for closed forms, divisibility "
@@ -331,7 +333,8 @@ def _(mo, pudding):
         vm = pudding.flock_view_model(flock)
         blocks = [mo.md(vm["markdown"]),
                   mo.accordion({"📋 copy flock (markdown)": mo.md(f"```\n{vm['markdown']}\n```")}),
-                  mo.ui.table([{"id": c["id"], "status": c["badge"], "conjecture": c["statement"],
+                  mo.ui.table([{"id": c["id"], "status": c["badge"],          # plain-text cells →
+                                "conjecture": pudding.answer_text(c["statement"]),  # clean the LaTeX
                                 "witness / why": c["witness"] or c["detail"], "by": c["origin"]}
                                for c in vm["conjectures"]], selection=None, label="the flock")]
         blocks += [mo.md("#### the harnesses — the oracle runs these; the prose doesn't decide"),
@@ -345,7 +348,7 @@ def _(mo, pudding):
     return (flock_board,)
 
 
-@app.cell
+@app.cell(hide_code=True)
 async def _(dcontext, dmodels, dn, flock_board, gen_btn, mo, pudding):
     # Always DEFINE `flock` (None until run) so the prove cells below never show "ancestor stopped".
     flock = None
@@ -377,10 +380,11 @@ async def _(dcontext, dmodels, dn, flock_board, gen_btn, mo, pudding):
 
 
 @app.cell(hide_code=True)
-def _(flock, mo):
+def _(flock, mo, pudding):
     _survs = flock.survivors if flock else []          # flock is None until Discover runs
-    prove_pick = mo.ui.dropdown(
-        options={f"{s.id}: {s.statement[:70]}": s.id for s in _survs} or {"(no survivors yet)": ""},
+    prove_pick = mo.ui.dropdown(                        # dropdown labels are plain text → clean LaTeX
+        options={f"{s.id}: {pudding.answer_text(s.statement)[:70]}": s.id for s in _survs}
+                or {"(no survivors yet)": ""},
         label="a survivor to put to the solver")
     prove_btn = mo.ui.run_button(label="⊢ Prove or disprove (fan out the solver)")
     mo.vstack([mo.md("#### survivors → the expensive fan-out  ·  *survived ≠ proven*"),
