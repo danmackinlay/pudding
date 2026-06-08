@@ -24,7 +24,7 @@ DEFAULT_MODELS = lineup.default_models()
 def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy: str = "cot",
           max_tokens: int | None = None, concurrency: int = DEFAULT_CONCURRENCY,
           timeout: float | None = None, backend: str = "local", provider: str | None = None,
-          on_event=None, sem=None) -> Job:
+          decide: bool = False, on_event=None, sem=None) -> Job:
     """Fan out k seeded samples per model, vote + cluster the answers → a `Job`.
 
     job = pudding.solve("…", k=8, models=["deepseek-v4-pro", "qwen3-7-max"])
@@ -32,6 +32,11 @@ def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy
 
     `timeout` is a per-attempt wall-clock cap (seconds) — set it for interactive use so a
     network/engine stall fails fast instead of hanging on the HTTP-layer timeout.
+
+    `decide=True` is **prove-or-disprove mode**: the statement is framed so each chain ends with a
+    canonical \\boxed{True|False|Unknown}, and answers cluster by *verdict* (not phrasing) — so a
+    decision gets a meaningful maj@k. (Lean-free: this reports what the models *assert*; checking the
+    verdict is *correct* is the prover's job — PROVER_PLAN.)
     """
     if backend != "local":
         raise NotImplementedError("backend='modal' is deferred to the prover (STUDIO_PLAN §2)")
@@ -47,7 +52,7 @@ def solve(problem: str, *, k: int = 5, models: list[str] | None = None, strategy
              for seed in range(k)]
     spec = {"problem": problem, "k": k, "model_names": names, "strategy": strategy,
             "max_tokens": max_tokens, "concurrency": concurrency, "timeout": timeout,
-            "temperature": temperature}
+            "temperature": temperature, "decide": decide}
     job = Job(uuid.uuid4().hex[:12], spec, lanes, on_event=on_event, sem=sem)   # 48 bits — headroom
     store.write(job.id, job.to_dict())             # persist as pending so the id is collectable
     try:

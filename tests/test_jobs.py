@@ -346,6 +346,35 @@ def test_answer_rendering_math_vs_prose_and_plaintext():
     assert answer_text("\\boxed{144}") == "144" and answer_text(None) == "∅"
 
 
+def test_verdict_normalization_is_conservative():
+    from pudding import verdict
+    assert verdict("True") == "true" and verdict("False") == "false" and verdict("Unknown") == "unknown"
+    assert verdict("\\text{The statement is true.}") == "true"        # cleaned + keyword
+    assert verdict("The claim holds") == "true"
+    assert verdict("This is disproved by a counterexample") == "false"
+    assert verdict("does not hold") == "false" and verdict("it is not true") == "false"  # negations
+    assert verdict("143") is None                                    # numeric → not hijacked
+    assert verdict("both true and false in parts") is None           # ambiguous → no guess
+
+
+def test_decide_mode_clusters_by_verdict():
+    # Different "true" phrasings must collapse to ONE verdict cluster (so a decision gets a real
+    # maj@k); a "false" chain dissents. The fake ignores the (decide-framed) prompt and answers by seed.
+    _true = ["True", "true", "\\text{The statement is true.}", "The claim holds"]
+
+    async def _fake(problem, *, strategy, model, provider, temperature, seed, max_tokens, **kw):
+        ans = "False" if seed == 0 else _true[seed % len(_true)]      # seed 0 dissents
+        return {"boxed": ans, "transcript": f"…\\boxed{{{ans}}}", "thinking": "",
+                "completion_tokens": 10, "truncated": False, "ttft_s": None,
+                "decode_tok_s": None, "error": None}
+    jobs.solve_one_async = _fake
+    res = api.solve("Is the sum of two evens even?", k=4, models=["deepseek-v4-pro"],
+                    decide=True).result()
+    keys = {c.key: c.count for c in res.clusters}
+    assert keys == {"verdict:true": 3, "verdict:false": 1}           # 3 phrasings → one cluster
+    assert res.answer in _true and res.count == 3 and res.n_answered == 4
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:

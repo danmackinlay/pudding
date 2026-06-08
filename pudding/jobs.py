@@ -18,9 +18,22 @@ from solver_loop import solve_one_async        # one chain → {boxed, transcrip
 from eval import _norm_latex, _as_number        # reuse the grader's answer normalization
 from streaming import ev
 from . import store
-from .artifacts import to_markdown, est_cost_total
+from .artifacts import est_cost_total, to_markdown, verdict
 
 _DONE = object()
+
+# `decide` mode (api.solve(decide=True)) frames a prove-or-disprove statement so the model ends with
+# a canonical verdict token — then clustering is exact (see _cluster_key). The original statement is
+# kept in spec["problem"] for provenance/display; only the engine call sees this wrapper.
+_DECIDE_PROMPT = (
+    "Decide whether the following statement is TRUE or FALSE. Reason carefully, then give your final "
+    "verdict as \\boxed{{True}}, \\boxed{{False}}, or \\boxed{{Unknown}} (use Unknown only if it "
+    "cannot be decided from the information given).\n\nStatement:\n{statement}")
+
+
+def _engine_problem(spec: dict) -> str:
+    p = spec["problem"]
+    return _DECIDE_PROMPT.format(statement=p) if spec.get("decide") else p
 
 
 # --- records ---------------------------------------------------------------
@@ -79,9 +92,14 @@ class Result:
 
 
 # --- clustering / reduction ------------------------------------------------
-def _cluster_key(boxed: str | None):
+def _cluster_key(boxed: str | None, decide: bool = False):
     if not boxed:
         return None
+    if decide:                      # prove-or-disprove → cluster by the verdict, not the phrasing
+        v = verdict(boxed)
+        if v is not None:
+            return f"verdict:{v}"   # "True" / "the statement is true." / \boxed{True} → one cluster
+        # not verdict-like → fall through to the normal key (don't force it)
     s = _norm_latex(boxed).strip().strip("$").strip()   # \boxed{$143$} clusters with \boxed{143}
     num = _as_number(s)
     if num is not None:
@@ -95,10 +113,11 @@ def _reduce(attempts: list[Attempt], spec: dict) -> Result:
     if spec.get("strategy") == "prove":         # Track 2 reducer swap: Pass@k = first/shortest that
         from pudding.prove import reduce_proofs  # compiles (the compiler is unfakeable). PROVER_PLAN.md;
         return reduce_proofs(attempts, spec)     # inert until the fork adds pudding/prove.py.
-    answered = [a for a in attempts if _cluster_key(a.boxed) is not None]
+    decide = bool(spec.get("decide"))
+    answered = [a for a in attempts if _cluster_key(a.boxed, decide) is not None]
     by_key: dict[str, list[Attempt]] = {}
     for a in answered:
-        by_key.setdefault(_cluster_key(a.boxed), []).append(a)
+        by_key.setdefault(_cluster_key(a.boxed, decide), []).append(a)
     clusters = [Cluster(answer=atts[0].boxed, key=k, count=len(atts),
                         models=sorted({a.model for a in atts}))
                 for k, atts in by_key.items()]
@@ -293,7 +312,7 @@ class Job:
                           model=info.get(n, (None, n))[1], strategy=self.spec["strategy"],
                           seed=s, temperature=temperature)
                      for n in self.spec["model_names"] for s in range(start, start + add)]
-        new = await _collect(self.spec["problem"], new_lanes, max_tokens=self.spec["max_tokens"],
+        new = await _collect(_engine_problem(self.spec), new_lanes, max_tokens=self.spec["max_tokens"],
                              concurrency=self.spec["concurrency"], emit=self._emit,
                              timeout=self.spec.get("timeout"), sem=self._sem)
         self.attempts = sorted(self.attempts + new, key=lambda a: (a.model, a.seed))
@@ -329,7 +348,7 @@ class Job:
     async def _run(self) -> Result:
         self.status = "running"
         try:
-            self.attempts = await _collect(self.spec["problem"], self.lanes,
+            self.attempts = await _collect(_engine_problem(self.spec), self.lanes,
                                            max_tokens=self.spec["max_tokens"],
                                            concurrency=self.spec["concurrency"], emit=self._emit,
                                            timeout=self.spec.get("timeout"), sem=self._sem)

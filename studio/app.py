@@ -123,19 +123,21 @@ def _(lineup, mo):
                               rows=4, full_width=True)
     models = mo.ui.multiselect(options=known, value=default, label="models")
     k = mo.ui.slider(1, 12, value=2, label="k (samples / model)")
+    decide = mo.ui.checkbox(label="decide (true/false verdict)")
     run = mo.ui.run_button(label="Solve")
-    mo.vstack([problem, mo.hstack([models, k], justify="start", gap=2), run])
-    return k, models, problem, run
+    mo.vstack([problem, mo.hstack([models, k, decide], justify="start", gap=2), run])
+    return decide, k, models, problem, run
 
 
 @app.cell(hide_code=True)
-async def _(asyncio, board, k, mo, models, problem, pudding, run):
+async def _(asyncio, board, decide, k, mo, models, problem, pudding, run):
     mo.stop(not run.value,
             mo.md("◦ press **Solve** to fan out — interrupt (■) or press Solve again to restart."))
     mo.stop(not problem.value.strip(), mo.md("◦ enter a problem first."))
     total = len(models.value) * k.value
     attempts = []
-    job = pudding.solve(problem.value, k=k.value, models=list(models.value), timeout=60)
+    job = pudding.solve(problem.value, k=k.value, models=list(models.value),
+                        decide=decide.value, timeout=60)
     try:
         async for ev in job.stream():
             if ev.get("type") == "attempt":
@@ -397,8 +399,8 @@ async def _(asyncio, board, flock, mo, prove_btn, prove_pick, pudding):
     mo.stop(not (flock and prove_btn.value), mo.md("◦ pick a survivor, then **Prove or disprove**."))
     sel = next((s for s in flock.survivors if s.id == prove_pick.value), None)
     mo.stop(sel is None, mo.md("◦ no survivor selected."))
-    pjob = pudding.solve(f"Prove or disprove, with rigorous justification: {sel.statement}",
-                         k=2, models=flock.models, timeout=90)
+    # decide mode frames the statement for a True/False/Unknown verdict → clusters by verdict.
+    pjob = pudding.solve(sel.statement, k=2, models=flock.models, decide=True, timeout=90)
     pattempts = []
     try:
         async for pev in pjob.stream():

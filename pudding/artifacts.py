@@ -58,6 +58,38 @@ def answer_text(s) -> str:
     s = s.replace("$", "").replace("\\,", " ").replace("\\ ", " ")
     return re.sub(r"\s+", " ", s).strip() or "∅"
 
+
+# A prove-or-disprove answer is a verdict, not a value. `decide` mode (api.solve) elicits a
+# canonical \boxed{True|False|Unknown} token → the exact-token branch makes clustering reliable.
+# The fuzzy phrase fallback is CONSERVATIVE: it labels only unambiguous single-signal prose and
+# returns None otherwise, so it never confidently mislabels (and numeric answers are never hijacked).
+_FALSE_NEG = re.compile(r"\b(not true|does not hold|doesn'?t hold|fails? to hold|cannot hold)\b")
+_TRUE_RE = re.compile(r"\b(true|holds?|valid|proven|proved|correct)\b")
+_FALSE_RE = re.compile(r"\b(false|disprov\w*|counterexample|fails?|invalid|incorrect)\b")
+
+
+def verdict(s) -> str | None:
+    """Normalize a decision answer to 'true' / 'false' / 'unknown', or None if it isn't verdict-like.
+    Canonical tokens (what `decide` mode produces) match exactly; free prose is best-effort — a
+    negation-of-truth phrase ('not true' / 'does not hold') is decisively false, then a lone true/
+    false signal decides, else None (no guess → numeric answers aren't hijacked)."""
+    t = answer_text(s).strip().lower().rstrip(".!")
+    if not t:
+        return None
+    if t in ("true", "false", "unknown"):
+        return t
+    if t in ("undetermined", "undecided", "indeterminate", "open", "unproven", "cannot be determined"):
+        return "unknown"
+    if _FALSE_NEG.search(t):                 # "not true" / "does not hold" → false, decisively
+        return "false"
+    f, tr = bool(_FALSE_RE.search(t)), bool(_TRUE_RE.search(t))
+    if f and not tr:
+        return "false"
+    if tr and not f:
+        return "true"
+    return None                              # ambiguous/none → fall back to normal string clustering
+
+
 _PRICES_PATH = Path(os.environ.get(
     "WORKBENCH_PRICES", Path(__file__).resolve().parent.parent / "prices.json"))
 

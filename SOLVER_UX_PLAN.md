@@ -16,8 +16,13 @@ Everything here is a new lens/widget over the existing `Job` / `view_model` / `F
 library helper — never a new engine.
 
 ## 1. What already exists (reuse; do not rebuild)
-- **Library:** `pudding.solve / solve_many / conjecture / falsify / discover / get / recent / pin /
-  get_pin`; `Job` (await / `.result()` / `.stream()` / `.cancel()` / `.widen(k)`, store-backed,
+- **Verdict (decide) mode:** `solve(…, decide=True)` frames a prove-or-disprove statement so each
+  chain ends with a canonical `\boxed{True|False|Unknown}` and clusters by *verdict* not phrasing
+  (Lean-free — reports what the models *assert*; verifying it is the prover's job). `pudding.verdict`
+  + `pudding.answer_text` are the helpers; the studio has a "decide" checkbox and the survivor→solve
+  path uses it. Live: a true statement → one `verdict:true` cluster, agreement 2/2.
+- **Library:** `pudding.solve / solve_many / conjecture / falsify / discover / get / recent / delete /
+  pin / get_pin`; `Job` (await / `.result()` / `.stream()` / `.cancel()` / `.widen(k)`, store-backed,
   `summary()` / `completed` for poll-based grids); `view_model` / `to_html` / `render(target=)`;
   `flock_view_model`. Headless, opt-in `on_event`. Store is now atomic + corrupt-tolerant.
 - **Studio (`studio/app.py`, marimo):** the answer-cluster **board** (stream-fill + kill-switch +
