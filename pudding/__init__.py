@@ -12,12 +12,12 @@ reconnect with ``pudding.get(id)``. Interactivity is opt-in (``on_event`` / ``jo
     job = pudding.solve("…", k=8, models=["deepseek-v4-pro", "qwen3-7-max"])
     res = await job                                        # async; or `async for e in job.stream()`
 """
-from .api import (DEFAULT_MODELS, conjecture, discover, falsify, get, get_pin, pin, recent,
-                  solve, solve_many)
+from .api import (DEFAULT_MODELS, conjecture, delete, discover, falsify, get, get_pin, pin,
+                  recent, solve, solve_many)
 from .artifacts import render, to_html, view_model
 from .discovery import Conjecture, Flock, flock_view_model
 from .jobs import Attempt, Cluster, Job, Result
 
-__all__ = ["solve", "solve_many", "get", "recent", "pin", "get_pin", "render", "view_model",
-           "to_html", "Job", "Result", "Attempt", "Cluster", "DEFAULT_MODELS",
+__all__ = ["solve", "solve_many", "get", "recent", "delete", "pin", "get_pin", "render",
+           "view_model", "to_html", "Job", "Result", "Attempt", "Cluster", "DEFAULT_MODELS",
            "conjecture", "falsify", "discover", "Conjecture", "Flock", "flock_view_model"]

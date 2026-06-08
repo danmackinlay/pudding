@@ -130,26 +130,53 @@ async def _(asyncio, board, k, mo, models, problem, pudding, run):
 
 @app.cell(hide_code=True)
 def _(mo):
+    # ♻ Reuse & manage runs (P7): browse/sort/filter/delete the store; the durable unit is the id.
     refresh = mo.ui.run_button(label="↻ refresh")
-    return (refresh,)
-
-
-@app.cell(hide_code=True)
-def _(mo, pudding, refresh):
-    _ = refresh.value                                  # re-read the list when refresh is clicked
-    runs = pudding.recent(20)                          # newest runs from the job store (any session)
-    options = {f"{(s['answer'] or '∅')} · {s['problem']}  [{s['id']}]": s["id"] for s in runs}
-    pick = mo.ui.dropdown(options=options or {"(no past runs yet)": ""}, label="recent runs")
+    runs_status = mo.ui.dropdown(options=["all", "done", "error", "cancelled", "running", "pending"],
+                                 value="all", label="status")
+    runs_query = mo.ui.text(placeholder="search problems…", label="filter")
     by_id = mo.ui.text(placeholder="…or paste a job / pin id", label="load by id")
-    mo.vstack([mo.md("### ♻ Reuse a past run — the durable unit is the id, not the cell"),
-               mo.hstack([pick, refresh], justify="start", gap=2), by_id])
-    return by_id, pick
+    del_id = mo.ui.text(placeholder="id to delete", label="🗑 delete")
+    del_btn = mo.ui.run_button(label="delete")
+    mo.vstack([mo.md("### ♻ Reuse & manage runs — the durable unit is the id, not the cell"),
+               mo.hstack([runs_status, runs_query, refresh], justify="start", gap=2),
+               mo.hstack([by_id, del_id, del_btn], justify="start", gap=2)])
+    return by_id, del_btn, del_id, refresh, runs_query, runs_status
 
 
 @app.cell(hide_code=True)
-def _(board, by_id, mo, pick, pudding):
-    rid = (by_id.value or "").strip() or pick.value
-    mo.stop(not rid, mo.md("◦ pick a recent run or paste an id to reuse it."))
+def _(del_btn, del_id, mo, pudding):
+    # Delete-by-id (paste/copy an id from the table). The table below depends on `last_delete`, so a
+    # deletion re-lists live. (Kept independent of the table selection to avoid a reactive cycle.)
+    last_delete = None
+    if del_btn.value and del_id.value.strip():
+        _rid = del_id.value.strip()
+        last_delete = (_rid, pudding.delete(_rid))
+        mo.output.replace(mo.md(f"🗑 deleted `{_rid}`" if last_delete[1]
+                                else f"◦ nothing to delete for `{_rid}`"))
+    return (last_delete,)
+
+
+@app.cell(hide_code=True)
+def _(last_delete, mo, pudding, refresh, runs_query, runs_status):
+    _ = (refresh.value, last_delete)                   # re-list on refresh OR after a delete
+    _status = None if runs_status.value == "all" else runs_status.value
+    _runs = pudding.recent(200, status=_status, query=runs_query.value or None)
+    _rows = [{"id": r["id"], "problem": r["problem"], "answer": r["answer"] or "∅",
+              "agree": r["agreement"], "status": r["status"], "k": r["k"],
+              "models": ", ".join(r["models"]), "tok": r["tokens"]} for r in _runs]
+    runs_table = mo.ui.table(_rows, selection="single", page_size=8,
+                             label=f"{len(_rows)} run(s) · click a row to load · sort/search in-table")
+    mo.output.replace(runs_table if _rows else
+                      mo.md("*(no runs match — solve something, or clear the filter)*"))
+    return (runs_table,)
+
+
+@app.cell(hide_code=True)
+def _(board, by_id, mo, pudding, runs_table):
+    _sel = runs_table.value
+    rid = (by_id.value or "").strip() or (_sel[0]["id"] if _sel else "")
+    mo.stop(not rid, mo.md("◦ click a row, or paste an id, to load a run."))
     loaded_job = pudding.get(rid)                      # a Job…
     reused = loaded_job._result if (loaded_job and loaded_job._result) else pudding.get_pin(rid)  # …or a pin
     mo.stop(reused is None, mo.md(f"◦ no run found for `{rid}`."))

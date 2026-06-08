@@ -291,6 +291,49 @@ def test_solve_many_requires_a_running_loop():
         assert "running event loop" in str(e)
 
 
+# --- P7: run-management browser (index / recent filter+sort / delete / reindex) ----------------
+def test_delete_forgets_run_from_index_and_store():
+    _use(_fake_solve_one_async)
+    job = api.solve("zeta-delete-me problem", k=1, models=["deepseek-v4-pro"]); job.result()
+    assert any(s["id"] == job.id for s in api.recent(500))   # present before
+    assert api.delete(job.id) is True
+    assert all(s["id"] != job.id for s in api.recent(500))   # gone from the index
+    assert api.get(job.id) is None                           # and from the store
+    assert api.delete(job.id) is False                       # idempotent: nothing left to remove
+
+
+def test_recent_filters_by_query_and_status():
+    _use(_fake_solve_one_async)
+    api.solve("kangaroo-marker alpha", k=1, models=["deepseek-v4-pro"]).result()
+    api.solve("kangaroo-marker beta", k=1, models=["deepseek-v4-pro"]).result()
+    api.solve("unrelated gamma", k=1, models=["deepseek-v4-pro"]).result()
+    hits = api.recent(500, query="kangaroo-marker")
+    assert len(hits) == 2 and all("kangaroo-marker" in h["problem"] for h in hits)
+    assert all(h["status"] == "done" for h in api.recent(500, status="done"))
+    assert api.recent(500, status="cancelled", query="kangaroo-marker") == []
+
+
+def test_recent_reads_index_without_rescanning_files():
+    # P7 DoD: recent() lists from the O(index) cache, not a full-dir parse. Prove it by deleting
+    # every run *file* but leaving the index — the rows still list (then reindex would drop them).
+    from pudding import store
+    _use(_fake_solve_one_async)
+    job = api.solve("indexed-only run", k=1, models=["deepseek-v4-pro"]); job.result()
+    (store._ROOT / f"{job.id}.json").unlink()                # file gone, index entry remains
+    assert any(s["id"] == job.id for s in api.recent(500))   # listed from the cache alone
+    store.reindex()                                          # rebuild from files → drops the orphan
+    assert all(s["id"] != job.id for s in api.recent(500))
+
+
+def test_reindex_heals_a_missing_index():
+    from pudding import store
+    _use(_fake_solve_one_async)
+    job = api.solve("heal-me run", k=1, models=["deepseek-v4-pro"]); job.result()
+    store._INDEX.unlink()                                    # nuke the cache
+    assert any(s["id"] == job.id for s in api.recent(500))   # summaries() heals from the files
+    assert store._INDEX.exists()
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for fn in fns:
