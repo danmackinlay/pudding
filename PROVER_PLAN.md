@@ -91,6 +91,47 @@ subtraction or `/` as integer division silently changing meaning; `Nat.Prime` vs
   cheap-filter-before-expensive-step. **DoD:** a survived conjecture flows end-to-end to a verified
   (and faithfulness-audited) Lean proof.
 
+## 4½. Glass-box reframe — draft-sketch-prove, human-curated (decided 2026-06-09)
+
+Context: by mid-2026 the SOTA moved from "one fine-tuned model emits a whole proof" to **hybrid
+harnesses** — iterative refinement (the single largest driver) + recursive decomposition (the
+frontier) — wrapping a **generalist reasoner** that matters more than the Lean specialist;
+autoformalisation has moved *inside* the loop ("draft-sketch-prove is the spine"). See
+`livingthing/notebook/ai_reasoning.qmd#prover-architectures`. Q1 already sits on the right side of
+this (rents a generalist + does iterative refinement); the only gap was decomposition.
+
+What changes — and doesn't: the **USP is unchanged** (auditable faithfulness, refuse to launder a
+green check; §7's "don't compete on Pass@k" still holds). The objective is a **glass-box** harness —
+friendly · interactive · transparent · human-steerable — the opposite of the closed, $/problem
+leaders (Aleph, Seed-Prover, Aristotle), which we explicitly do **not** chase.
+
+Key insight: **decomposition is a *transparency* feature, not a Pass-rate trick.** A whole-proof
+Pass@k loop is a black box about its process; a draft-sketch-prove tree is human-readable (the
+informal sketch *is* the plan) and the compiler validates the *skeleton's logic* before any hole is
+proved. So build the transparent core, skip the walled-garden machinery:
+
+  BUILD: informal sketch w/ `sorry` holes · per-lemma faithfulness gate + dossier · human curation
+         · **Q1 as the leaf-prover** (close one atomic goal — done) · thin recursion.
+  SKIP : Mathlib semantic retriever · MCTS / self-retraining (Pass-rate machinery, opaque).
+
+Effect on the Q-order: Q1 (done) is the leaf-prover. **Next = the draft-sketch spike** (below).
+Q2's studio becomes the **sketch-tree + per-lemma dossier curation board** (not just a gallery).
+Q3's faithfulness gate audits **sub-lemmas**, not only the top statement. Q4 (discovery→prove) gains
+the sketch step in the middle.
+
+**Draft-sketch spike (the next build)** — new fork module `pudding/sketch.py`:
+  1. Generalist drafts a **flat decomposition**: standalone `lemma hᵢ : Tᵢ := by sorry` leaves + a
+     top `theorem target := by <combine the hᵢ>`.
+  2. **Skeleton validity** — Kimina elaborates the lemmas-as-sorry + the combine step: an *error* ⇒
+     the sketch's logic is broken (revise the sketch); *only sorries* ⇒ the decomposition is valid.
+     The glass-box win: the compiler checks the plan before we spend on leaves.
+  3. Close each leaf independently with `prove_one_async` (Q1, Pass@k per leaf — parallel).
+  4. Reassemble (splice the found proofs) and **final-verify the whole file** (the real verdict).
+  5. Render the tree: skeleton + per-hole status (✓ closed / ✗ open / sketch-invalid).
+  **DoD:** a multi-step statement decomposes, the skeleton type-checks, the leaves are closed by Q1,
+  the reassembled proof compiles end-to-end, and the tree is human-readable. Reuses the Kimina
+  verifier + `prove_one_async`; no shared-core change.
+
 ## 5. Architecture rules (inherited from FORK.md)
 - The prover is a **reducer + engine swap** on the existing `Job`/envelope/widget — not a new job
   layer. If you're rebuilding orchestration, you're diverging the core.
