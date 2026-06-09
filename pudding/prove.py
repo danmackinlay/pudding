@@ -45,14 +45,16 @@ compiling proof.
 Give a brief proof plan, then output the COMPLETE Lean 4 file — the imports, the theorem, and \
 your proof — in a SINGLE ```lean4 code block. Use Mathlib. Leave no `sorry` and no `admit`."""
 
-# Last ```lean4 fence (Goedel's extractor; inlined so the engine doesn't couple to the parked
-# prover_loop.py skeleton).
-_FENCE = re.compile(r"```lean4\n(.*?)\n```", re.DOTALL)
+# The last Lean code fence. Lenient on the language tag — models drift between ```lean4, ```lean,
+# and a bare ``` — so accept any fence and prefer the last block that actually looks like Lean.
+_FENCE = re.compile(r"```[^\n]*\n(.*?)```", re.DOTALL)
 
 
 def extract_proof(text: str) -> str | None:
-    m = _FENCE.findall(text)
-    return m[-1] if m else None
+    blocks = [b.rstrip("` \n") for b in _FENCE.findall(text or "")]
+    leanish = [b for b in blocks if ("theorem" in b or "lemma" in b or "import " in b)]
+    cands = leanish or blocks
+    return cands[-1].strip() if cands else None
 
 
 # --- anti-laundering: the model must prove the statement we PASTED, not a weaker rewrite -----
