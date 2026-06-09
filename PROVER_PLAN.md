@@ -6,10 +6,14 @@ Self-contained handoff for a fresh instance working **in the `../pudding-prover`
 infra — do **not** re-derive it), `FINDINGS.md` (trust ladder), `STUDIO_PLAN.md` (the `Job`/widget
 the prover reuses — decision #7), and `FORK.md` (the frozen-core contract).
 
-## 0. The two gates (PLAN §5 — both must hold before building much)
+## 0. The two gates (PLAN §5) — RESOLVED 2026-06-09 with Dan
 1. **Name a problem you actually want *bulletproof*.** Without a real target the prover is a toy.
-2. **A usability answer for Lean proof state.** No chat renders it; the **studio** can (embed
-   `lean4web`, or just render the compiler verdict + proof text + the faithfulness dossier).
+   → **anchor = the solver's surviving conjectures** (`discovery.Flock.survivors`): discovery→prove
+   is the track's spine, not an afterthought. Q1's spike used a hand-written MiniF2F statement to
+   de-risk the verifier infra independently of any one target.
+2. **A usability answer for Lean proof state.** No chat renders it; the **studio** can.
+   → **render the compiler verdict + proof text + faithfulness dossier** (NOT a `lean4web` embed —
+   lean4web shows interactive goal state, a different need than the audit dossier that is our point).
 
 ## 1. The core insight (why this track is pudding-shaped)
 **The bottleneck is *stating* the theorem, not proving it.** Proof search is now cheap: a prebuilt
@@ -25,6 +29,45 @@ So this track applies pudding's own discipline one level up: **AI proposes forma
 cheap oracles dispose of the unfaithful ones, the human curates the survivors, the prover proves.**
 The product isn't "we autoformalise" (everyone's mediocre at that) — it's *"we make formalisation
 **auditable** and refuse to launder a green checkmark."*
+
+## 1½. North star & trajectory (the arc the draft-sketch spike serves)
+
+**North star — the glass-box proof workbench.** A working mathematician hands it an informal claim,
+or a conjecture that survived the solver's falsify oracle, and through a *transparent, interactive,
+human-curated* **draft-sketch-prove** loop arrives at a **Lean-verified** proof in which *every
+formalisation step is auditable for faithfulness*. The machine proposes abundantly (sketches,
+lemmas, proofs); cheap oracles dispose of the unfaithful; the human curates the survivors; the
+compiler is the final, unfakeable judge. The product is **trust you can inspect** — not a Pass-rate.
+
+**Why this shape, not the SOTA leaders.** The mid-2026 frontier (Aleph, Seed-Prover, Aristotle) is
+closed, batch, metered in dollars-per-problem, optimising Pass-rate behind an opaque wall. We
+deliberately do *not* compete there (§7). Our two durable bets, which none of them sell:
+- **Auditable faithfulness** — a green ✓ on an unfaithful statement is worse than no proof, and
+  faithfulness is exactly what the compiler cannot check; so we make it inspectable (§1, §3).
+- **Glass box** — friendly · interactive · transparent · human-steerable. Load-bearing insight
+  (§4½): *decomposition is a transparency feature, not a Pass-rate trick* — the informal sketch IS
+  the human-readable plan, and the compiler validates the skeleton's logic before we prove leaves.
+
+**The trajectory** (each stage builds the next; reuse the harness, rent the model):
+
+| Stage | What it adds | Status |
+|---|---|---|
+| **Leaf-prover + verifier** | close one atomic goal vs. the unfakeable Kimina compiler; Pass@k + self-correct; anti-laundering signature guard | ✅ Q1 done |
+| **Draft-sketch spine** | generalist drafts a flat `lemma … := by sorry` decomposition; Kimina validates the *skeleton's logic*; leaves closed by the leaf-prover; reassemble + final-verify. The transparency surface. | ◀ **now** (the spike, §4½) |
+| **Per-lemma faithfulness gate** | the four cheap oracles (elaboration · non-vacuity · numeric via the falsify oracle · back-translation) + dossier, applied to *each* formalised lemma — the USP, at decomposition granularity | next (was Q3) |
+| **Interactive curation studio** | the sketch-tree + per-lemma dossier board; human reads the plan, approves/edits/rejects lemmas, reprioritises. Where "glass box" cashes out. | then (Q2, reframed) |
+| **Discovery→prove loop** | `discovery` survivors → sketch → formalise+audit → prove: the end-to-end useful spine, anchored on Gate 1 | then (Q4) |
+| **Thin recursion** | recurse the sketch on any leaf the leaf-prover can't close one-shot — a depth knob, not a search engine | as needed |
+
+**Off the path (explicit non-destinations).** Mathlib semantic retriever; MCTS / self-retraining;
+chasing raw Pass@k or the closed leaderboards. These buy Pass-rate at the cost of opacity — the
+opposite of the north star. Add a retriever only if a *real* target proves un-closable without one,
+and even then prefer a legible one (`exact?`/grep) over an opaque vector oracle.
+
+**Invariants across every stage.** The trust ladder (§3), with Lean ✓ *conditional* on the gate;
+build-the-harness / rent-the-model (the generalist is a swappable commodity, the scaffold is the
+durable asset); reuse the existing `Job`/envelope/studio/oracle (a reducer+engine swap, never a new
+job layer); never auto-accept a formalisation — the human gate is a feature, not a failure.
 
 ## 2. What exists to reuse (do not rebuild)
 - **Verified Lean infra (PROVER_RESEARCH_ADDENDUM.md):** `modal.Image.from_registry(
@@ -59,6 +102,11 @@ subtraction or `/` as integer division silently changing meaning; `Nat.Prime` vs
 "prime"; trivial restatement (`2 = 2 := rfl`). All compile; some prove; none mean what was intended.
 
 ## 4. Build order (gates first, then the USP)
+
+> The **current arc + status** is §1½ and the reframe is §4½. **Q1 is done** (the leaf-prover, on
+> `claude/prover`). The Q2/Q3/Q4 entries below keep their original framing; §1½ maps how the
+> glass-box reframe reshapes them (Q2 → sketch-tree/dossier curation board, Q3 → *per-lemma*
+> faithfulness gate, Q4 gains the draft-sketch step in the middle).
 
 - **Q1 — formal-first proof spike (no autoformalisation; cheapest honest step; PLAN §5's "one
   hand-written MiniF2F statement, feel the friction").** Stand up the Kimina verifier on Modal
